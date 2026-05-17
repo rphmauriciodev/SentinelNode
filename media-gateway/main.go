@@ -77,9 +77,31 @@ func recordVideo(req RecordRequest) {
 
 	outputPath := fmt.Sprintf("recordings/%s_%d.mp4", req.DeviceID, time.Now().Unix())
 
-	log.Printf("[FFmpeg] Iniciando captura de %ds para a camera [%s]...\n", req.DurationSeconds, req.DeviceID)
+	if len(req.VideoURL) > 7 && req.VideoURL[:7] == "rtsp://" && req.VideoURL != "rtsp://localhost:8554/live/edge-agent-01" {
+		log.Printf("[FFmpeg] Tentando gravar de CAMERA REAL RTSP: %s\n", req.VideoURL)
 
-	cmd := exec.Command("ffmpeg",
+		cmd := exec.Command("ffmpeg",
+			"-y",
+			"-rtsp_transport", "tcp",
+			"-i", req.VideoURL,
+			"-t", fmt.Sprintf("%d", req.DurationSeconds),
+			"-c", "copy",
+			outputPath,
+		)
+
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			log.Printf("[FFmpeg] Sucesso! Vídeo da câmera real salvo em: %s\n", outputPath)
+			return
+		}
+
+		log.Printf("[FFmpeg] Falha ao conectar na câmera real. Ativando simulador local... Erro: %v\n", err)
+		log.Printf("Console do FFmpeg: %s\n", string(output))
+	}
+
+	log.Printf("[FFmpeg] Iniciando gerador local de imagens para teste (Câmera simulada)...\n")
+
+	cmdFallback := exec.Command("ffmpeg",
 		"-y",
 		"-f", "lavfi",
 		"-i", "testsrc=size=640x480:rate=30",
@@ -89,11 +111,11 @@ func recordVideo(req RecordRequest) {
 		outputPath,
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmdFallback.CombinedOutput()
 	if err != nil {
-		log.Printf("[FFmpeg ERROR] Falha ao rodar gravação: %v\nOutput do console:\n%s\n", err, string(output))
+		log.Printf("[FFmpeg ERROR] Falha no fallback: %v. Output: %s\n", err, string(output))
 		return
 	}
 
-	log.Printf("[FFmpeg] Gravacao concluida com sucesso! Video salvo em: %s\n", outputPath)
+	log.Printf("[FFmpeg] Gravação simulada concluída! Vídeo salvo em: %s\n", outputPath)
 }
