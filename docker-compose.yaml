@@ -6,9 +6,11 @@ services:
     container_name: sentinel_mosquitto
     ports:
       - "1883:1883"
+      - "8883:8883"
       - "9001:9001"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./certs:/mosquitto/config/certs
     restart: always
   db:
     image: postgres:15-alpine

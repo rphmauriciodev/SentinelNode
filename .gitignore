@@ -36,3 +36,9 @@ Thumbs.db
 # Logs e arquivos temporários
 *.log
 tmp/
+
+# Chaves privadas e certificados
+certs/*.key
+certs/*.csr
+certs/*.srl
+certs/*.crt

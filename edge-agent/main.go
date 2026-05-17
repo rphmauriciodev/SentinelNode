@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -13,11 +16,17 @@ import (
 )
 
 func main() {
+	tlsConfig, err := NewTLSConfig()
+	if err != nil {
+		log.Fatalf("Erro ao criar configuração TLS: %v", err)
+	}
+
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("tcp://localhost:1883")
+	opts.AddBroker("ssl://localhost:8883")
 	opts.SetClientID("edge-agent-01")
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetPingTimeout(5 * time.Second)
+	opts.SetTLSConfig(tlsConfig)
 
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Println("Conectado ao broker MQTT com sucesso!")
@@ -103,4 +112,27 @@ func main() {
 
 	client.Disconnect(250)
 	log.Println("Agente finalizado.")
+}
+
+func NewTLSConfig() (*tls.Config, error) {
+	caCert, err := os.ReadFile("../certs/ca.crt")
+	if err != nil {
+		return nil, err
+	}
+
+	rootPool := x509.NewCertPool()
+	if !rootPool.AppendCertsFromPEM(caCert) {
+		return nil, errors.New("failed to append CA certificate")
+	}
+
+	cert, err := tls.LoadX509KeyPair("../certs/client.crt", "../certs/client.key")
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{
+		RootCAs:            rootPool,
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: true,
+	}, nil
 }
