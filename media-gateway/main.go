@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -68,10 +69,31 @@ func handleRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func recordVideo(req RecordRequest) {
-	log.Printf("[FFmpeg] Iniciando gravação de %s por %d segundos...", req.VideoURL, req.DurationSeconds)
+	err := os.MkdirAll("recordings", os.ModePerm)
+	if err != nil {
+		log.Printf("Erro ao criar a pasta recordings: %v\n", err)
+		return
+	}
 
-	time.Sleep(time.Duration(req.DurationSeconds) * time.Second)
+	outputPath := fmt.Sprintf("recordings/%s_%d.mp4", req.DeviceID, time.Now().Unix())
 
-	log.Printf("[FFmpeg] Gravação finalizada para %s", req.DeviceID)
+	log.Printf("[FFmpeg] Iniciando captura de %ds para a camera [%s]...\n", req.DurationSeconds, req.DeviceID)
 
+	cmd := exec.Command("ffmpeg",
+		"-y",
+		"-f", "lavfi",
+		"-i", "testsrc=size=640x480:rate=30",
+		"-t", fmt.Sprintf("%d", req.DurationSeconds),
+		"-c:v", "libx264",
+		"-pix_fmt", "yuv420p",
+		outputPath,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[FFmpeg ERROR] Falha ao rodar gravação: %v\nOutput do console:\n%s\n", err, string(output))
+		return
+	}
+
+	log.Printf("[FFmpeg] Gravacao concluida com sucesso! Video salvo em: %s\n", outputPath)
 }
