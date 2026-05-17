@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/rphmauriciodev/SentinelNode/media-gateway/config"
 )
 
 type RecordRequest struct {
@@ -18,13 +20,22 @@ type RecordRequest struct {
 	DurationSeconds int    `json:"duration_seconds"`
 }
 
+var recordingsDir string
+
 func main() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Erro ao carregar configuração: %v", err)
+	}
+
+	recordingsDir = cfg.RecordingsDir
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/record", handleRecord)
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         fmt.Sprintf(":%s", cfg.Port),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -69,15 +80,15 @@ func handleRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func recordVideo(req RecordRequest) {
-	err := os.MkdirAll("recordings", os.ModePerm)
+	err := os.MkdirAll(recordingsDir, os.ModePerm)
 	if err != nil {
 		log.Printf("Erro ao criar a pasta recordings: %v\n", err)
 		return
 	}
 
-	outputPath := fmt.Sprintf("recordings/%s_%d.mp4", req.DeviceID, time.Now().Unix())
+	outputPath := fmt.Sprintf("%s/%s_%d.mp4", recordingsDir, req.DeviceID, time.Now().Unix())
 
-	if len(req.VideoURL) > 7 && req.VideoURL[:7] == "rtsp://" && req.VideoURL != "rtsp://localhost:8554/live/edge-agent-01" {
+	if len(req.VideoURL) > 7 && req.VideoURL[:7] == "rtsp://" && req.VideoURL != fmt.Sprintf("rtsp://localhost:8554/live/%s", req.DeviceID) {
 		log.Printf("[FFmpeg] Tentando gravar de CAMERA REAL RTSP: %s\n", req.VideoURL)
 
 		cmd := exec.Command("ffmpeg",

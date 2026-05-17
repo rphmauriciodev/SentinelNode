@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -12,18 +13,24 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rphmauriciodev/SentinelNode/edge-agent/config"
 	"github.com/rphmauriciodev/SentinelNode/edge-agent/internal/protocol"
 )
 
 func main() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Erro ao carregar configuração: %v", err)
+	}
+
 	tlsConfig, err := NewTLSConfig()
 	if err != nil {
 		log.Fatalf("Erro ao criar configuração TLS: %v", err)
 	}
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("ssl://localhost:8883")
-	opts.SetClientID("edge-agent-01")
+	opts.AddBroker(cfg.MQTTBroker)
+	opts.SetClientID(cfg.MQTTClientID)
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetPingTimeout(5 * time.Second)
 	opts.SetTLSConfig(tlsConfig)
@@ -58,13 +65,13 @@ func main() {
 			select {
 			case <-ticker.C:
 				payload := protocol.EncodeHeartbeat(
-					"edge-agent-01",
+					cfg.DeviceID,
 					time.Now(),
 					"active",
 					"1.0.0",
 				)
 
-				topic := "sentinel/devices/edge-agent-01/heartbeat"
+				topic := fmt.Sprintf("sentinel/devices/%s/heartbeat", cfg.DeviceID)
 
 				token := client.Publish(topic, 1, false, payload)
 				if token.Wait() && token.Error() != nil {
@@ -85,13 +92,13 @@ func main() {
 
 		for scanner.Scan() {
 			event := protocol.EncodeEvent(
-				"edge-agent-01",
+				cfg.DeviceID,
 				time.Now(),
 				"motion_detected",
-				"rtsp://localhost:8554/live/edge-agent-01",
+				fmt.Sprintf("rtsp://localhost:8554/live/%s", cfg.DeviceID),
 			)
 
-			topic := "sentinel/devices/edge-agent-01/events"
+			topic := fmt.Sprintf("sentinel/devices/%s/events", cfg.DeviceID)
 			log.Println("Publicando alerta de movimento...")
 
 			token := client.Publish(topic, 1, false, event)

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/config"
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/database"
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/gateway"
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/models"
@@ -18,8 +20,17 @@ import (
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/worker"
 )
 
+var gatewayURL string
+
 func main() {
 	log.Println("--- SentinelNode: Ingestion Engine ---")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Erro ao carregar configuração: %v", err)
+	}
+
+	gatewayURL = cfg.MediaGatewayURL
 
 	tlsConfig, err := NewTLSConfig()
 	if err != nil {
@@ -28,15 +39,16 @@ func main() {
 
 	worker.Init(100)
 
-	connStr := "host=localhost port=5432 user=sentinel_user password=sentinel_password dbname=sentinel_db sslmode=disable"
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSslMode)
 	database.Init(connStr)
 	defer database.DB.Close()
 
 	go worker.Start()
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("ssl://localhost:8883")
-	opts.SetClientID("ingestion-engine-01")
+	opts.AddBroker(cfg.MQTTBroker)
+	opts.SetClientID(cfg.MQTTClientID)
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetPingTimeout(1 * time.Second)
 	opts.SetTLSConfig(tlsConfig)
@@ -127,7 +139,6 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	if event.EventType == "motion_detected" {
-		gatewayURL := "http://localhost:8080/record"
 		go gateway.TriggerRecording(gatewayURL, event.DeviceID, event.VideoURL)
 	}
 }

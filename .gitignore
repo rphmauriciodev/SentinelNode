@@ -42,3 +42,7 @@ certs/*.key
 certs/*.csr
 certs/*.srl
 certs/*.crt
+
+# Variáveis de ambiente
+*.env
+.env
