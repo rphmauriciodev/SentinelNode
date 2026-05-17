@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +20,19 @@ type Heartbeat struct {
 	FirmwareVersion string    `json:"firmware_version"`
 }
 
+type EventMessage struct {
+	DeviceID  string    `json:"device_id"`
+	Timestamp time.Time `json:"timestamp"`
+	EventType string    `json:"event_type"`
+	VideoURL  string    `json:"video_url"`
+}
+
+type RecordRequest struct {
+	DeviceID        string `json:"device_id"`
+	VideoURL        string `json:"video_url"`
+	DurationSeconds int    `json:"duration_seconds"`
+}
+
 func main() {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker("tcp://localhost:1883")
@@ -27,16 +42,23 @@ func main() {
 
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Println("Backend conectado ao broker MQTT com sucesso!")
-
-		topic := "sentinel/devices/+/heartbeat"
 		qos := byte(1)
 
-		token := client.Subscribe(topic, qos, handleHeartbeat)
-		if token.Wait() && token.Error() != nil {
-			log.Printf("Erro ao se inscrever no tópico [%s]: %v\n", topic, token.Error())
+		hbTopic := "sentinel/devices/+/heartbeat"
+		hbToken := client.Subscribe(hbTopic, qos, handleHeartbeat)
+		if hbToken.Wait() && hbToken.Error() != nil {
+			log.Printf("Erro ao se inscrever no tópico [%s]: %v\n", hbTopic, hbToken.Error())
 			return
 		}
-		log.Printf("Inscrito com sucesso no tópico: %s\n", topic)
+		log.Printf("Inscrito com sucesso no tópico: %s\n", hbTopic)
+
+		eTopic := "sentinel/devices/+/events"
+		eToken := client.Subscribe(eTopic, qos, handleEvent)
+		if eToken.Wait() && eToken.Error() != nil {
+			log.Printf("Erro ao se inscrever no tópico [%s]: %v\n", eTopic, eToken.Error())
+			return
+		}
+		log.Printf("Inscrito com sucesso no tópico: %s\n", eTopic)
 	}
 
 	opts.OnConnectionLost = func(client mqtt.Client, err error) {
@@ -73,4 +95,61 @@ func handleHeartbeat(client mqtt.Client, msg mqtt.Message) {
 
 	log.Printf(">> Dispositivo [%s] está saudável (%s). Firmware: %s. Enviado em: %v\n",
 		hb.DeviceID, hb.Status, hb.FirmwareVersion, hb.Timestamp.Format(time.RFC3339))
+}
+
+func handleEvent(client mqtt.Client, msg mqtt.Message) {
+	log.Printf("[Mensagem Recebida] Tópico: %s\n", msg.Topic())
+
+	var event EventMessage
+	err := json.Unmarshal(msg.Payload(), &event)
+	if err != nil {
+		log.Printf("Erro ao decodificar JSON do evento: %v (Payload bruto: %s)\n", err, string(msg.Payload()))
+		return
+	}
+	log.Printf("\n=== NOVO ALERTA DE MOVIMENTO ===")
+	log.Printf("Dispositivo: %s", event.DeviceID)
+	log.Printf("Evento: %s", event.EventType)
+	log.Printf("RTSP Stream: %s", event.VideoURL)
+	log.Printf("Horario: %v", event.Timestamp.Format("15:04:05"))
+	log.Printf("=================================\n")
+
+	if event.EventType == "motion_detected" {
+		triggerRecording(event.DeviceID, event.VideoURL)
+	}
+}
+
+func triggerRecording(deviceID, videoURL string) {
+	log.Printf("[API Media Gateway] Enviando comando de gravação para %s...\n", deviceID)
+
+	gatewayURL := "http://localhost:8080/record"
+	reqBody := RecordRequest{
+		DeviceID:        deviceID,
+		VideoURL:        videoURL,
+		DurationSeconds: 10,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Printf("Erro ao serializar payload: %v\n", err)
+		return
+	}
+
+	log.Printf("[HTTP REST] Enviando solicitação de gravação para o Media Gateway (%s)...\n", gatewayURL)
+
+	response, err := http.Post(gatewayURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Erro ao enviar solicitação de gravação: %v\n", err)
+		return
+	}
+	defer response.Body.Close()
+
+	log.Printf("[API Media Gateway] Resposta recebida: %s\n", response.Status)
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		log.Printf("Erro ao decodificar JSON da resposta: %v\n", err)
+		return
+	}
+
+	log.Printf("[API Media Gateway] Status da gravação: %s\n", result["status"])
 }

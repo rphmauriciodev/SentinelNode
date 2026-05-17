@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"log"
 	"os"
@@ -18,12 +19,19 @@ type Heartbeat struct {
 	FirmwareVersion string    `json:"firmware_version"`
 }
 
+type EventMessage struct {
+	DeviceID  string    `json:"device_id"`
+	Timestamp time.Time `json:"timestamp"`
+	EventType string    `json:"event_type"`
+	VideoURL  string    `json:"video_url"`
+}
+
 func main() {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker("tcp://localhost:1883")
 	opts.SetClientID("edge-agent-01")
 	opts.SetKeepAlive(60 * time.Second)
-	opts.SetPingTimeout(1 * time.Second)
+	opts.SetPingTimeout(5 * time.Second)
 
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Println("Conectado ao broker MQTT com sucesso!")
@@ -43,7 +51,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	log.Println("Agente rodando. Pressione Ctrl+C para encerrar.")
@@ -80,6 +88,35 @@ func main() {
 				log.Println("Loop de heartbeats finalizado.")
 				return
 			}
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+
+		for scanner.Scan() {
+			event := EventMessage{
+				DeviceID:  "edge-agent-01",
+				Timestamp: time.Now(),
+				EventType: "motion_detected",
+				VideoURL:  "rtsp://localhost:8554/live/edge-agent-01",
+			}
+
+			jsonData, err := json.Marshal(event)
+			if err != nil {
+				log.Printf("Erro ao serializar payload: %v\n", err)
+				continue
+			}
+
+			topic := "sentinel/devices/edge-agent-01/events"
+			log.Println("Publicando alerta de movimento...")
+
+			token := client.Publish(topic, 1, false, jsonData)
+			if token.Wait() && token.Error() != nil {
+				log.Printf("Erro ao enviar payload: %v\n", token.Error())
+			}
+
+			log.Printf("Payload enviado para o broker: %s\n", string(jsonData))
 		}
 	}()
 
