@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
@@ -10,21 +9,8 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rphmauriciodev/SentinelNode/edge-agent/internal/protocol"
 )
-
-type Heartbeat struct {
-	DeviceID        string    `json:"device_id"`
-	Timestamp       time.Time `json:"timestamp"`
-	Status          string    `json:"status"`
-	FirmwareVersion string    `json:"firmware_version"`
-}
-
-type EventMessage struct {
-	DeviceID  string    `json:"device_id"`
-	Timestamp time.Time `json:"timestamp"`
-	EventType string    `json:"event_type"`
-	VideoURL  string    `json:"video_url"`
-}
 
 func main() {
 	opts := mqtt.NewClientOptions()
@@ -62,27 +48,21 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				payload := Heartbeat{
-					DeviceID:        "edge-agent-01",
-					Timestamp:       time.Now(),
-					Status:          "active",
-					FirmwareVersion: "1.0.0",
-				}
-
-				jsonData, err := json.Marshal(payload)
-				if err != nil {
-					log.Printf("Erro ao serializar payload: %v\n", err)
-					continue
-				}
+				payload := protocol.EncodeHeartbeat(
+					"edge-agent-01",
+					time.Now(),
+					"active",
+					"1.0.0",
+				)
 
 				topic := "sentinel/devices/edge-agent-01/heartbeat"
 
-				token := client.Publish(topic, 1, false, jsonData)
+				token := client.Publish(topic, 1, false, payload)
 				if token.Wait() && token.Error() != nil {
 					log.Printf("Erro ao enviar payload: %v\n", token.Error())
 				}
 
-				log.Printf("Payload enviado para o broker: %s\n", string(jsonData))
+				log.Printf("Payload enviado para o broker: %x\n", payload)
 
 			case <-doneChan:
 				log.Println("Loop de heartbeats finalizado.")
@@ -95,28 +75,23 @@ func main() {
 		scanner := bufio.NewScanner(os.Stdin)
 
 		for scanner.Scan() {
-			event := EventMessage{
-				DeviceID:  "edge-agent-01",
-				Timestamp: time.Now(),
-				EventType: "motion_detected",
-				VideoURL:  "rtsp://localhost:8554/live/edge-agent-01",
-			}
-
-			jsonData, err := json.Marshal(event)
-			if err != nil {
-				log.Printf("Erro ao serializar payload: %v\n", err)
-				continue
-			}
+			event := protocol.EncodeEvent(
+				"edge-agent-01",
+				time.Now(),
+				"motion_detected",
+				"rtsp://localhost:8554/live/edge-agent-01",
+			)
 
 			topic := "sentinel/devices/edge-agent-01/events"
 			log.Println("Publicando alerta de movimento...")
 
-			token := client.Publish(topic, 1, false, jsonData)
+			token := client.Publish(topic, 1, false, event)
 			if token.Wait() && token.Error() != nil {
 				log.Printf("Erro ao enviar payload: %v\n", token.Error())
 			}
 
-			log.Printf("Payload enviado para o broker: %s\n", string(jsonData))
+			log.Printf("Payload enviado para o broker: %x\n", event)
+			log.Printf("Alerta binário enviado (%d bytes). URL: %s\n", len(event), "rtsp://localhost:8554/live/edge-agent-01")
 		}
 	}()
 

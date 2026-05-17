@@ -1,0 +1,38 @@
+# Binários compilados do Go
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Workspace do Go (ignorado para permitir ambientes locais customizados)
+go.work
+go.work.sum
+
+# Gravações de vídeo e mídia pesada (essencial para não inflar o Git)
+**/recordings/
+*.mp4
+
+# Configurações de IDEs (VS Code e JetBrains)
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Arquivos do Sistema Operacional
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs e arquivos temporários
+*.log
+tmp/
