@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -21,8 +22,13 @@ import (
 )
 
 var gatewayURL string
+var durationSeconds int
 
 func main() {
+	duration := flag.Int("duration", 60, "Duração da gravação em segundos")
+	flag.Parse()
+	durationSeconds = *duration
+
 	log.Println("--- SentinelNode: Ingestion Engine ---")
 
 	cfg, err := config.LoadConfig()
@@ -139,7 +145,7 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	if event.EventType == "motion_detected" {
-		go gateway.TriggerRecording(gatewayURL, event.DeviceID, event.VideoURL)
+		go gateway.TriggerRecording(gatewayURL, event.DeviceID, event.VideoURL, durationSeconds)
 	}
 }
 

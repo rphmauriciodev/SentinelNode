@@ -9,13 +9,13 @@ import (
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/models"
 )
 
-func TriggerRecording(gatewayURL string, deviceID string, videoURL string) {
-	log.Printf("[API Media Gateway] Enviando comando de gravação de 10s para %s...\n", deviceID)
+func TriggerRecording(gatewayURL string, deviceID string, videoURL string, durationSeconds int) {
+	log.Printf("[API Media Gateway] Enviando comando de gravação de %ds para %s...\n", durationSeconds, deviceID)
 
 	reqBody := models.RecordRequest{
 		DeviceID:        deviceID,
 		VideoURL:        videoURL,
-		DurationSeconds: 10,
+		DurationSeconds: durationSeconds,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
