@@ -43,6 +43,7 @@ certs/*.csr
 certs/*.srl
 certs/*.crt
 
-# Variáveis de ambiente
+# Variáveis de ambiente e configs locais
 *.env
 .env
+firmware/private.ini

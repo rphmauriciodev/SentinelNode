@@ -1,0 +1,5 @@
+[env:esp32cam]
+build_flags =
+    -D WIFI_SSID=\"NOME_DO_SEU_WIFI\"
+    -D WIFI_PASS=\"SENHA_DO_SEU_WIFI\"
+    -D MQTT_BROKER_IP=\"192.168.1.XXX\"
