@@ -1,5 +1,4 @@
 import subprocess
-import os
 
 def run_go_generator():
     print("[PlatformIO SCons Hook] Disparando gerador de certificados em Go...")
