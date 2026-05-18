@@ -29,24 +29,8 @@ const char* password = WIFI_PASS;
 const char* mqtt_broker = MQTT_BROKER_IP;
 const int mqtt_port = 8883;
 const char* device_id = "esp32-cam-01";
+#include "secrets.h"
 
-const char* ca_cert = R"EOF(
------BEGIN CERTIFICATE-----
-COLE O CONTEÚDO DO ca.crt AQUI
------END CERTIFICATE-----
-)EOF";
-
-const char* client_cert = R"EOF(
------BEGIN CERTIFICATE-----
-COLE O CONTEÚDO DO client.crt AQUI
------END CERTIFICATE-----
-)EOF";
-
-const char* client_key = R"EOF(
------BEGIN PRIVATE KEY-----
-COLE O CONTEÚDO DO client.key AQUI
------END PRIVATE KEY-----
-)EOF";
 
 WiFiClientSecure secureClient;
 PubSubClient mqttClient(secureClient);

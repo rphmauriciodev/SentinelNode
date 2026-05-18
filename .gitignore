@@ -47,3 +47,13 @@ certs/*.crt
 *.env
 .env
 firmware/private.ini
+
+# Cabeçalhos gerados dinamicamente e chaves locais
+firmware/include/secrets.h
+
+# Diretórios de compilação do PlatformIO
+firmware/.pio/
+firmware/.pioenvs/
+firmware/.piolibdeps/
+firmware/.clang_complete
+firmware/.gcc-flags.json

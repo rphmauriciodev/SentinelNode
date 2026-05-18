@@ -81,7 +81,7 @@ docker compose up -d
     ```bash
     cp private.ini.example private.ini
     ```
-3.  Abra o `private.ini` e configure suas credenciais de Wi-Fi e o hostname local da sua máquina:
+3.  Abra o `private.ini` e configure suas credenciais de Wi-Fi e o IP/hostname local da sua máquina:
     ```ini
     [env:esp32cam]
     build_flags =
@@ -89,8 +89,10 @@ docker compose up -d
         -D WIFI_PASS=\"SenhaDoSeuWifi\"
         -D MQTT_BROKER_IP=\"nome-do-seu-notebook.local\"
     ```
-4.  Abra o arquivo [main.cpp](firmware/src/main.cpp), copie o conteúdo dos certificados gerados na sua pasta `certs/` e cole nas variáveis correspondentes: `ca_cert` (ca.crt), `client_cert` (client.crt), e `client_key` (client.key).
-5.  Conecte o seu ESP32-CAM no computador via porta USB usando a placa-base MB e clique no botão **Upload** no VS Code PlatformIO para compilar e gravar!
+4.  **Carga Automática de Certificados (DX Avançada)**: Não há necessidade de copiar e colar chaves ou certificados manualmente no arquivo de código [main.cpp](firmware/src/main.cpp)! 
+    O sistema possui um script pré-build inteligente escrito em Go ([generate_certs.go](firmware/generate_certs.go)). Ao clicar em compilar, ele lerá de forma 100% automatizada os certificados gerados na sua pasta `certs/` e gerará o cabeçalho dinâmico `secrets.h` para a compilação do ESP32!
+5.  Conecte o seu ESP32-CAM no computador via porta USB usando a placa-base MB e clique no botão **Upload** no VS Code PlatformIO para compilar e gravar de forma automatizada!
+
 
 ### 4. Inicializar os Serviços de Backend
 Abra abas separadas no terminal para rodar o servidor:
