@@ -113,8 +113,8 @@ func handleHeartbeat(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	log.Printf("[HEARTBEAT] Dispositivo [%s] saudável. Firmware: %s. Status: %s\n",
-		hb.DeviceID, hb.FirmwareVersion, hb.Status)
+	log.Printf("[HEARTBEAT] Dispositivo [%s] saudável. Firmware: %s. Status: %s. StreamURL: %s\n",
+		hb.DeviceID, hb.FirmwareVersion, hb.Status, hb.StreamURL)
 }
 
 func handleEvent(client mqtt.Client, msg mqtt.Message) {

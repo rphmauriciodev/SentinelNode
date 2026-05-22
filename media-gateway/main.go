@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,7 +21,11 @@ type RecordRequest struct {
 	DurationSeconds int    `json:"duration_seconds"`
 }
 
-var recordingsDir string
+var (
+	recordingsDir    string
+	activeRecordings = make(map[string]bool)
+	recordingsMu     sync.Mutex
+)
 
 func main() {
 	cfg, err := config.LoadConfig()
@@ -68,10 +73,28 @@ func handleRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recordingsMu.Lock()
+	if activeRecordings[req.DeviceID] {
+		recordingsMu.Unlock()
+		log.Printf("[Media Gateway] Gravação já em andamento para o dispositivo %s. Ignorando pedido duplicado.\n", req.DeviceID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status": "already_recording", "device_id": "%s"}`, req.DeviceID)
+		return
+	}
+	activeRecordings[req.DeviceID] = true
+	recordingsMu.Unlock()
+
 	log.Printf("Pedido de gravação recebido: Device=%s, URL=%s, Duração=%ds\n",
 		req.DeviceID, req.VideoURL, req.DurationSeconds)
 
-	go recordVideo(req)
+	go func() {
+		recordVideo(req)
+
+		recordingsMu.Lock()
+		delete(activeRecordings, req.DeviceID)
+		recordingsMu.Unlock()
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -88,17 +111,33 @@ func recordVideo(req RecordRequest) {
 
 	outputPath := fmt.Sprintf("%s/%s_%d.mp4", recordingsDir, req.DeviceID, time.Now().Unix())
 
-	if len(req.VideoURL) > 7 && req.VideoURL[:7] == "rtsp://" && req.VideoURL != fmt.Sprintf("rtsp://localhost:8554/live/%s", req.DeviceID) {
-		log.Printf("[FFmpeg] Tentando gravar de CAMERA REAL RTSP: %s\n", req.VideoURL)
+	isHttp := len(req.VideoURL) > 7 && req.VideoURL[:7] == "http://"
+	isRtsp := len(req.VideoURL) > 7 && req.VideoURL[:7] == "rtsp://"
 
-		cmd := exec.Command("ffmpeg",
-			"-y",
-			"-rtsp_transport", "tcp",
-			"-i", req.VideoURL,
-			"-t", fmt.Sprintf("%d", req.DurationSeconds),
-			"-c", "copy",
-			outputPath,
-		)
+	if isRtsp || isHttp {
+		log.Printf("[FFmpeg] Tentando gravar de CAMERA REAL (%s): %s\n", req.DeviceID, req.VideoURL)
+
+		var cmd *exec.Cmd
+		if isRtsp {
+			cmd = exec.Command("ffmpeg",
+				"-y",
+				"-rtsp_transport", "tcp",
+				"-i", req.VideoURL,
+				"-t", fmt.Sprintf("%d", req.DurationSeconds),
+				"-c", "copy",
+				outputPath,
+			)
+		} else {
+			// Para stream HTTP MJPEG da ESP32-CAM, precisamos transcodificar para H.264
+			cmd = exec.Command("ffmpeg",
+				"-y",
+				"-i", req.VideoURL,
+				"-t", fmt.Sprintf("%d", req.DurationSeconds),
+				"-c:v", "libx264",
+				"-pix_fmt", "yuv420p",
+				outputPath,
+			)
+		}
 
 		output, err := cmd.CombinedOutput()
 		if err == nil {
@@ -106,7 +145,7 @@ func recordVideo(req RecordRequest) {
 			return
 		}
 
-		log.Printf("[FFmpeg] Falha ao conectar na câmera real. Ativando simulador local... Erro: %v\n", err)
+		log.Printf("[FFmpeg] Falha ao conectar ou gravar da câmera real. Ativando simulador local... Erro: %v\n", err)
 		log.Printf("Console do FFmpeg: %s\n", string(output))
 	}
 

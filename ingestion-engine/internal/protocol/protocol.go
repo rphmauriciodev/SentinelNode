@@ -63,11 +63,23 @@ func Decode(data []byte) (byte, interface{}, error) {
 		}
 		firmware := fmt.Sprintf("%d.%d.%d", fwBytes[0], fwBytes[1], fwBytes[2])
 
+		var urlLen uint16
+		if err := binary.Read(reader, binary.BigEndian, &urlLen); err != nil {
+			return 0, nil, err
+		}
+
+		urlBytes := make([]byte, urlLen)
+		if _, err := reader.Read(urlBytes); err != nil {
+			return 0, nil, err
+		}
+		streamURL := string(urlBytes)
+
 		hb := models.Heartbeat{
 			DeviceID:        deviceID,
 			Timestamp:       timestamp,
 			Status:          status,
 			FirmwareVersion: firmware,
+			StreamURL:       streamURL,
 		}
 		return pType, hb, nil
 
