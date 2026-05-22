@@ -12,6 +12,7 @@ WiFiClientSecure MqttService::_secureClient;
 PubSubClient MqttService::_mqttClient(MqttService::_secureClient);
 
 unsigned long MqttService::_lastRetryTime = 0;
+unsigned long MqttService::_currentRetryInterval = MqttService::MIN_RETRY_INTERVAL;
 bool MqttService::_wasConnected = false;
 
 void MqttService::init(const char* deviceId, const char* defaultBrokerIp, int port) {
@@ -19,6 +20,7 @@ void MqttService::init(const char* deviceId, const char* defaultBrokerIp, int po
     _defaultBrokerIp = defaultBrokerIp;
     _port = port;
     _lastRetryTime = 0;
+    _currentRetryInterval = MIN_RETRY_INTERVAL;
     _wasConnected = false;
     
     setupSecureClient();
@@ -69,7 +71,20 @@ bool MqttService::connectBroker() {
         _wasConnected = true;
         return true;
     } else {
-        Serial.printf("[MQTT ERROR] Falha na conexão. Código de estado: %d\n", _mqttClient.state());
+        int state = _mqttClient.state();
+        const char* reason = "Desconhecido";
+        switch (state) {
+            case -4: reason = "Connection Timeout (Sem resposta do broker)"; break;
+            case -3: reason = "Connection Lost (Conexão caiu após estabelecida)"; break;
+            case -2: reason = "Connect Failed (Falha ao abrir socket TCP)"; break;
+            case -1: reason = "Disconnected (Cliente desconectado)"; break;
+            case 1:  reason = "Bad Protocol Version (Protocolo incompatível)"; break;
+            case 2:  reason = "Identifier Rejected (ID do cliente recusado)"; break;
+            case 3:  reason = "Server Unavailable (Broker indisponível)"; break;
+            case 4:  reason = "Bad Credentials (Usuário ou senha incorretos)"; break;
+            case 5:  reason = "Unauthorized (Sem autorização)"; break;
+        }
+        Serial.printf("[MQTT ERROR] Falha na conexão TLS. Estado: %d [%s]\n", state, reason);
         return false;
     }
 }
@@ -90,18 +105,27 @@ void MqttService::handle() {
         if (_wasConnected) {
             Serial.println("[MQTT] Conexão com o broker perdida!");
             _wasConnected = false;
+            _lastRetryTime = now; // Inicia contagem
+            _currentRetryInterval = MIN_RETRY_INTERVAL; // Reseta backoff inicial
         }
 
-        // Reconexão periódica não-bloqueante
-        if (now - _lastRetryTime >= _retryInterval) {
+        // Reconexão periódica não-bloqueante com backoff exponencial
+        if (now - _lastRetryTime >= _currentRetryInterval) {
             _lastRetryTime = now;
+            
+            Serial.printf("[MQTT] Tentando reconectar (Intervalo atual: %lu segundos)...\n", _currentRetryInterval / 1000);
             
             // Tenta restabelecer segurança antes de discar se houve transição de rede
             if (_brokerToUse == nullptr) {
                 setupSecureClient();
             }
             
-            connectBroker();
+            if (connectBroker()) {
+                _currentRetryInterval = MIN_RETRY_INTERVAL; // Reseta ao conectar com sucesso
+            } else {
+                // Dobra o intervalo até o limite máximo de 5 minutos
+                _currentRetryInterval = min(_currentRetryInterval * 2, MAX_RETRY_INTERVAL);
+            }
         }
     } else {
         _mqttClient.loop();

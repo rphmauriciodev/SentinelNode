@@ -20,10 +20,11 @@ bool HttpStreamService::start() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     
-    // Otimização de hardware do ESP32-CAM: limita conexões para economizar SRAM
+    // Otimização de hardware do ESP32-CAM: limita conexões e aumenta a pilha
     config.max_open_sockets = 2;
     config.max_uri_handlers = 2;
     config.lru_purge_enable = true; // Libera conexões inativas se faltar socket
+    config.stack_size = 10240;      // Redimensionamento seguro da pilha (padrão é 4096, causa crash)
 
     httpd_uri_t streamUri = {
         .uri = "/stream",

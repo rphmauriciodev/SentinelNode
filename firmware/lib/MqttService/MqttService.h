@@ -35,7 +35,9 @@ private:
     static PubSubClient _mqttClient;
     
     static unsigned long _lastRetryTime;
-    static const unsigned long _retryInterval = 10000; // 10 segundos
+    static unsigned long _currentRetryInterval;
+    static const unsigned long MIN_RETRY_INTERVAL = 5000;   // 5 segundos
+    static const unsigned long MAX_RETRY_INTERVAL = 300000; // 5 minutos (300 segundos)
     static bool _wasConnected;
 };
 

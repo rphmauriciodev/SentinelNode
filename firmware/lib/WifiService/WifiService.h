@@ -27,7 +27,9 @@ private:
     static bool _wasConnected;
     static bool _justConnected;
     static unsigned long _lastRetryTime;
-    static const unsigned long _retryInterval = 10000; // 10 segundos
+    static unsigned long _currentRetryInterval;
+    static const unsigned long MIN_RETRY_INTERVAL = 5000;   // Mínimo de 5 segundos
+    static const unsigned long MAX_RETRY_INTERVAL = 300000; // Máximo de 5 minutos (300 segundos)
 };
 
 #endif // WIFI_SERVICE_H

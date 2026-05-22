@@ -5,6 +5,7 @@ const char* WifiService::_password = nullptr;
 bool WifiService::_wasConnected = false;
 bool WifiService::_justConnected = false;
 unsigned long WifiService::_lastRetryTime = 0;
+unsigned long WifiService::_currentRetryInterval = WifiService::MIN_RETRY_INTERVAL;
 
 void WifiService::init(const char* ssid, const char* password) {
     _ssid = ssid;
@@ -12,11 +13,12 @@ void WifiService::init(const char* ssid, const char* password) {
     _wasConnected = false;
     _justConnected = false;
     _lastRetryTime = 0;
+    _currentRetryInterval = MIN_RETRY_INTERVAL;
 
     Serial.printf("[WIFI] Iniciando conexão de rede...\n");
     Serial.printf("[WIFI] SSID: %s\n", _ssid);
     
-    // Configura o ESP32 como Station (cliente Wi-Fi) e garante baixo consumo de rádio se inativo
+    // Configura o ESP32 como Station (cliente Wi-Fi)
     WiFi.mode(WIFI_STA);
     WiFi.begin(_ssid, _password);
 
@@ -46,6 +48,7 @@ void WifiService::handle() {
         if (!_wasConnected) {
             _wasConnected = true;
             _justConnected = true;
+            _currentRetryInterval = MIN_RETRY_INTERVAL; // Reseta o backoff quando conectado com sucesso
             IPAddress ip = WiFi.localIP();
             Serial.printf("[WIFI] Conectado e autenticado! IP: %s\n", ip.toString().c_str());
         }
@@ -54,17 +57,21 @@ void WifiService::handle() {
             Serial.println("[WIFI ERROR] Conexão Wi-Fi perdida abruptamente!");
             _wasConnected = false;
             _justConnected = false;
-            _lastRetryTime = now; // Inicia a contagem de recuo
+            _lastRetryTime = now; // Inicia contagem
+            _currentRetryInterval = MIN_RETRY_INTERVAL; // Reseta backoff inicial para nova tentativa rápida
         }
 
-        // Reconexão periódica não-bloqueante
-        if (now - _lastRetryTime >= _retryInterval) {
+        // Reconexão periódica não-bloqueante com backoff exponencial
+        if (now - _lastRetryTime >= _currentRetryInterval) {
             _lastRetryTime = now;
-            Serial.println("[WIFI] Tentando reconectar ao ponto de acesso...");
+            Serial.printf("[WIFI] Tentando reconectar ao AP (Intervalo atual: %lu segundos)...\n", _currentRetryInterval / 1000);
             
-            // Força reinicialização da conexão
+            // Força reinicialização da conexão sem bloquear a CPU
             WiFi.disconnect();
             WiFi.begin(_ssid, _password);
+            
+            // Aumenta exponencialmente o tempo até o teto de 5 minutos
+            _currentRetryInterval = min(_currentRetryInterval * 2, MAX_RETRY_INTERVAL);
         }
     }
 }

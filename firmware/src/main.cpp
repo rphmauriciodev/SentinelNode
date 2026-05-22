@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <time.h>
+#include <esp_system.h>
 
 // Custom system libraries (modular architecture)
 #include "WatchdogSystem.h"
@@ -42,49 +43,67 @@ const unsigned long eventCooldown     = 15000; // 15 segundos (debounce de envio
 const unsigned long motionHoldTime    = 10000; // 10 segundos (tempo mínimo de trava)
 
 // Forward declarations
+void printResetReason();
 void syncNTPTime();
 void updateVideoUrl();
 void logTelemetry();
 
 void setup() {
-    // 1. Inicializa console serial para diagnósticos
+    // ESTÁGIO 1: Console Serial & Diagnósticos do Boot
     Serial.begin(115200);
-    delay(500);
+    Serial.flush(); // Garante envio dos buffers pendentes
+    delay(300);     // Dá tempo para o CH340 de hardware se sincronizar com a USB do host
+    
     Serial.println("\n\n======================================================================");
-    Serial.printf("SENTINELNODE FIRMWARE v%d.%d.%d (ESTÁVEL - ESP32 Arduino Core 2.0.x)\n", 
+    Serial.printf("SENTINELNODE FIRMWARE v%d.%d.%d (PRODUÇÃO - ESP32 Arduino Core 2.x)\n", 
                   FIRMWARE_MAJOR, FIRMWARE_MINOR, FIRMWARE_PATCH);
     Serial.println("======================================================================");
 
-    // 2. Inicializa o hardware Watchdog com timeout seguro de 12 segundos
-    WatchdogSystem::init(12);
+    // Decodifica a causa do último reinício (útil para diagnosticar crashes/brownouts)
+    printResetReason();
+    
+    // ESTÁGIO 2: Hardware Watchdog System (Timeout de 15s para suportar handshakes de criptografia)
+    WatchdogSystem::init(15);
+    WatchdogSystem::feed();
 
-    // 3. Inicializa o sensor de movimento PIR (GPIO 13) usando interrupções físicas
+    // ESTÁGIO 3: Sensores Físicos (PIR)
+    // Inicializa o PIR com tratamento robusto de glitch temporal
     PirDriver::init(13);
+    WatchdogSystem::feed();
 
-    // 4. Inicializa o serviço Wi-Fi (máquina de estados híbrida)
+    // ESTÁGIO 4: Conectividade Wi-Fi e Pilha de Rede (LwIP)
+    // Inicializar o Wi-Fi primeiro garante que a pilha TCP/IP (LwIP) esteja ativa antes de qualquer soquete
+    Serial.println("[SYSTEM] Inicializando conexão de rede Wi-Fi e pilha TCP/IP (LwIP)...");
     WifiService::init(ssid, password);
     WatchdogSystem::feed();
 
-    // 5. Se o Wi-Fi conseguiu se conectar no boot, sincroniza o relógio (NTP)
+    // ESTÁGIO 5: Inicialização da Câmera (Reset físico + Fallback dinâmico)
+    Serial.println("[SYSTEM] Iniciando subsistema da Câmera...");
+    bool cameraOk = CameraDriver::init();
+    WatchdogSystem::feed();
+    delay(100); // Pequena pausa para acomodar picos transientes pós boot da câmera
+
+    // Se o Wi-Fi conseguiu se conectar no boot, sincroniza relógio (NTP)
     if (WifiService::isConnected()) {
         syncNTPTime();
         updateVideoUrl();
     }
     WatchdogSystem::feed();
 
-    // 6. Inicializa o barramento de comunicação segura TLS MQTT (mTLS)
-    MqttService::init(device_id, mqtt_broker, mqtt_port);
-    WatchdogSystem::feed();
-
-    // 7. Inicializa o sensor físico da câmera (OV3660 calibrado a 15MHz)
-    if (CameraDriver::init()) {
-        // Se a câmera subiu, inicia o servidor HTTP para streaming de vídeo
+    // ESTÁGIO 6: Inicialização de Servidores
+    if (cameraOk) {
+        // Inicializa o servidor HTTP para streaming de vídeo (agora com LwIP ativo e seguro)
         HttpStreamService::start();
     } else {
-        Serial.println("[SYSTEM WARNING] Câmera falhou ao subir. O sistema rodará apenas como sensor PIR!");
+        Serial.println("[SYSTEM WARNING] Câmera falhou ao subir. O sistema operará somente com sensores.");
     }
+    WatchdogSystem::feed();
+
+    // ESTÁGIO 7: Barramento Seguro TLS MQTT (mTLS)
+    Serial.println("[SYSTEM] Inicializando barramento de eventos seguro TLS MQTT...");
+    MqttService::init(device_id, mqtt_broker, mqtt_port);
     
-    // Alimenta o Watchdog ao concluir a inicialização
+    // Alimenta o Watchdog ao concluir a inicialização em estágios
     WatchdogSystem::feed();
     Serial.println("[SYSTEM] Setup concluído! SentinelNode está ativo e monitorando...");
 }
@@ -101,7 +120,7 @@ void loop() {
 
     // 3. Gerencia a transição de reconexão do Wi-Fi para disparar eventos
     if (WifiService::checkJustConnected()) {
-        Serial.println("[SYSTEM] Wi-Fi reconectado. Atualizando parâmetros de rede...");
+        Serial.println("[SYSTEM] Wi-Fi reconectado. Sincronizando relógio e endpoint...");
         syncNTPTime();
         updateVideoUrl();
         WatchdogSystem::feed();
@@ -113,11 +132,11 @@ void loop() {
         MqttService::sendHeartbeat(0x01, FIRMWARE_MAJOR, FIRMWARE_MINOR, FIRMWARE_PATCH, video_url);
     }
 
-    // 5. Processamento de Eventos PIR (Gatilho rápido e assíncrono via interrupção)
+    // 5. Processamento de Eventos PIR (Gatilho rápido e assíncrono via interrupção validada)
     if (PirDriver::hasTriggered()) {
         // Verifica se a trava de cooldown expirou antes de enviar nova mensagem
         if (!motionActive && (now - lastEventTime >= eventCooldown)) {
-            Serial.println("[SYSTEM EVENT] Movimento capturado pelo sensor PIR!");
+            Serial.println("[SYSTEM EVENT] Movimento validado sustentado pelo sensor PIR!");
             motionActive = true;
             lastEventTime = now;
             
@@ -146,6 +165,23 @@ void loop() {
 
     // Cede 10ms para que o kernel do FreeRTOS cuide de tarefas secundárias da CPU (ex: Wi-Fi/TLS)
     vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+void printResetReason() {
+    esp_reset_reason_t reason = esp_reset_reason();
+    Serial.print("[BOOT DIAG] Causa do último reset: ");
+    switch (reason) {
+        case ESP_RST_POWERON:   Serial.println("POWER-ON (Energização normal)"); break;
+        case ESP_RST_SW:        Serial.println("SOFTWARE RESET (Solicitado por código via esp_restart)"); break;
+        case ESP_RST_PANIC:     Serial.println("EXCEPTION PANIC (Crash/Falha crítica de software)"); break;
+        case ESP_RST_INT_WDT:   Serial.println("INTERRUPT WATCHDOG (CPU travada)"); break;
+        case ESP_RST_TASK_WDT:  Serial.println("TASK WATCHDOG (Task principal estourou o timeout)"); break;
+        case ESP_RST_WDT:       Serial.println("OTHER WATCHDOGS (Watchdog de hardware secundário)"); break;
+        case ESP_RST_DEEPSLEEP: Serial.println("DEEP SLEEP EXIT (Acordou de hibernação)"); break;
+        case ESP_RST_BROWNOUT:  Serial.println("BROWNOUT DETECTED (Queda abrupta de tensão na alimentação!)"); break;
+        case ESP_RST_SDIO:      Serial.println("SDIO RESET (Reset via SDIO)"); break;
+        default:                Serial.println("INDETERMINADO"); break;
+    }
 }
 
 void syncNTPTime() {
@@ -179,8 +215,9 @@ void updateVideoUrl() {
 }
 
 void logTelemetry() {
-    Serial.printf("[TELEMETRY] Free Heap: %u B | Min Free Heap: %u B | Free PSRAM: %u B | PIR Sensor: %s | Video Stream: %s\n",
+    Serial.printf("[TELEMETRY] Heap Livre: %u B | Bloco Contíguo Máx: %u B | Mínimo Histórico: %u B | PSRAM Livre: %u B | PIR: %s | Streaming: %s\n",
                   ESP.getFreeHeap(),
+                  ESP.getMaxAllocHeap(), // Diagnóstico primordial contra heap fragmentation
                   ESP.getMinFreeHeap(),
                   ESP.getFreePsram(),
                   PirDriver::readStatus() ? "DETECTADO" : "LIMPO",
