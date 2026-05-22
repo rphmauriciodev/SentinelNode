@@ -1,300 +1,188 @@
+// ==============================================================================
+// SentinelNode ESP32-CAM - Main Orchestrator (Production Firmware)
+// Resilient, modular, non-blocking and protected by hardware Task Watchdog
+// ==============================================================================
+
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
 #include <time.h>
-#include "esp_camera.h"
-#include "esp_http_server.h"
 
-#define Y2_GPIO_NUM        5 
-#define Y3_GPIO_NUM       18 
-#define Y4_GPIO_NUM       19 
-#define Y5_GPIO_NUM       21 
-#define Y6_GPIO_NUM       36 
-#define Y7_GPIO_NUM       39 
-#define Y8_GPIO_NUM       34 
-#define Y9_GPIO_NUM       35 
-#define VSYNC_GPIO_NUM    25
-#define HREF_GPIO_NUM     23 
-#define PCLK_GPIO_NUM     22 
-#define SIOD_GPIO_NUM     26 
-#define SIOC_GPIO_NUM     27 
-#define PWDN_GPIO_NUM     32 
-#define RESET_GPIO_NUM    -1 
-#define PIR_PIN           13
+// Custom system libraries (modular architecture)
+#include "WatchdogSystem.h"
+#include "CameraDriver.h"
+#include "PirDriver.h"
+#include "WifiService.h"
+#include "MqttService.h"
+#include "HttpStreamService.h"
 
+// Firmware constants
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASS;
-
 const char* mqtt_broker = MQTT_BROKER_IP;
 const int mqtt_port = 8883;
 const char* device_id = "esp32-cam-01";
-#include "secrets.h"
 
+// Versioning parameters
+const uint8_t FIRMWARE_MAJOR = 1;
+const uint8_t FIRMWARE_MINOR = 0;
+const uint8_t FIRMWARE_PATCH = 0;
 
-WiFiClientSecure secureClient;
-PubSubClient mqttClient(secureClient);
-httpd_handle_t camera_httpd = NULL;
+// Application states
+char video_url[128] = "";
+bool motionActive = false;
 
+// Non-blocking timers
 unsigned long lastHeartbeat = 0;
-bool motionDetected = false;
-String video_url = "";
+unsigned long lastTelemetry = 0;
+unsigned long lastEventTime = 0;
 
-void connectToWiFi();
-void connectToMQTT();
+// Constants timing
+const unsigned long heartbeatInterval = 30000; // 30 segundos
+const unsigned long telemetryInterval = 10000; // 10 segundos
+const unsigned long eventCooldown     = 15000; // 15 segundos (debounce de envio)
+const unsigned long motionHoldTime    = 10000; // 10 segundos (tempo mínimo de trava)
+
+// Forward declarations
 void syncNTPTime();
-void startCameraServer();
-void sendHeartbeat();
-void sendEvent();
-
-void sendHeartbeat() {
-    uint8_t buf[128];
-    int offset = 0;
-
-    buf[offset++] = 0x53; // Magic1 ('S')
-    buf[offset++] = 0x4E; // Magic2 ('N')
-    buf[offset++] = 0x01; // Tipo do Pacote: Heartbeat (0x01)
-
-    time_t now = time(nullptr);
-    uint64_t ts = (uint64_t)now;
-    for (int i = 7; i >= 0; i--) {
-        buf[offset++] = (ts >> (i * 8)) & 0xFF;
-    }
-
-    uint8_t dev_len = strlen(device_id);
-    buf[offset++] = dev_len;
-    memcpy(&buf[offset], device_id, dev_len);
-    offset += dev_len;
-    
-    buf[offset++] = 0x01;
-
-    buf[offset++] = 1; // Major
-    buf[offset++] = 0; // Minor
-    buf[offset++] = 0; // Patch
-    String topic = String("sentinel/devices/") + device_id + "/heartbeat";
-    mqttClient.publish(topic.c_str(), buf, offset);
-    Serial.printf("[MQTT] Heartbeat binário enviado (%d bytes)\n", offset);
-}
-
-void sendEvent() {
-    uint8_t buf[256];
-    int offset = 0;
-
-    buf[offset++] = 0x53; // Magic1 ('S')
-    buf[offset++] = 0x4E; // Magic2 ('N')
-    buf[offset++] = 0x02; // Tipo do Pacote: Alerta de Evento (0x02)
-    time_t now = time(nullptr);
-    uint64_t ts = (uint64_t)now;
-    for (int i = 7; i >= 0; i--) {
-        buf[offset++] = (ts >> (i * 8)) & 0xFF;
-    }
-
-    uint8_t dev_len = strlen(device_id);
-    buf[offset++] = dev_len;
-    memcpy(&buf[offset], device_id, dev_len);
-    offset += dev_len;
-    buf[offset++] = 0x01;
-    uint16_t url_len = video_url.length();
-    buf[offset++] = (url_len >> 8) & 0xFF;
-    buf[offset++] = url_len & 0xFF;
-    memcpy(&buf[offset], video_url.c_str(), url_len);
-    offset += url_len;
-    String topic = String("sentinel/devices/") + device_id + "/events";
-    mqttClient.publish(topic.c_str(), buf, offset);
-    Serial.printf("[MQTT] Alerta de movimento binário enviado (%d bytes). URL: %s\n", offset, video_url.c_str());
-}
+void updateVideoUrl();
+void logTelemetry();
 
 void setup() {
+    // 1. Inicializa console serial para diagnósticos
     Serial.begin(115200);
-    
-    pinMode(PIR_PIN, INPUT);
+    delay(500);
+    Serial.println("\n\n======================================================================");
+    Serial.printf("SENTINELNODE FIRMWARE v%d.%d.%d (ESTÁVEL - ESP32 Arduino Core 2.0.x)\n", 
+                  FIRMWARE_MAJOR, FIRMWARE_MINOR, FIRMWARE_PATCH);
+    Serial.println("======================================================================");
 
-    camera_config_t config;
-    config.ledc_channel = LEDC_CHANNEL_0;
-    config.ledc_timer = LEDC_TIMER_0;
-    config.pin_d0 = Y2_GPIO_NUM;
-    config.pin_d1 = Y3_GPIO_NUM;
-    config.pin_d2 = Y4_GPIO_NUM;
-    config.pin_d3 = Y5_GPIO_NUM;
-    config.pin_d4 = Y6_GPIO_NUM;
-    config.pin_d5 = Y7_GPIO_NUM;
-    config.pin_d6 = Y8_GPIO_NUM;
-    config.pin_d7 = Y9_GPIO_NUM;
-    config.pin_xclk = XCLK_GPIO_NUM;
-    config.pin_pclk = PCLK_GPIO_NUM;
-    config.pin_vsync = VSYNC_GPIO_NUM;
-    config.pin_href = HREF_GPIO_NUM;
-    config.pin_sscb_sda = SIOD_GPIO_NUM;
-    config.pin_sscb_scl = SIOC_GPIO_NUM;
-    config.pin_pwdn = PWDN_GPIO_NUM;
-    config.pin_reset = RESET_GPIO_NUM;
-    config.xclk_freq_hz = 20000000;
-    config.pixel_format = PIXFORMAT_JPEG; 
+    // 2. Inicializa o hardware Watchdog com timeout seguro de 12 segundos
+    WatchdogSystem::init(12);
 
-    if (psramFound()) {
-        config.frame_size = FRAMESIZE_VGA;
-        config.jpeg_quality = 12;
-        config.fb_count = 2;
+    // 3. Inicializa o sensor de movimento PIR (GPIO 13) usando interrupções físicas
+    PirDriver::init(13);
+
+    // 4. Inicializa o serviço Wi-Fi (máquina de estados híbrida)
+    WifiService::init(ssid, password);
+    WatchdogSystem::feed();
+
+    // 5. Se o Wi-Fi conseguiu se conectar no boot, sincroniza o relógio (NTP)
+    if (WifiService::isConnected()) {
+        syncNTPTime();
+        updateVideoUrl();
+    }
+    WatchdogSystem::feed();
+
+    // 6. Inicializa o barramento de comunicação segura TLS MQTT (mTLS)
+    MqttService::init(device_id, mqtt_broker, mqtt_port);
+    WatchdogSystem::feed();
+
+    // 7. Inicializa o sensor físico da câmera (OV3660 calibrado a 15MHz)
+    if (CameraDriver::init()) {
+        // Se a câmera subiu, inicia o servidor HTTP para streaming de vídeo
+        HttpStreamService::start();
     } else {
-        config.frame_size = FRAMESIZE_CIF;
-        config.jpeg_quality = 12;
-        config.fb_count = 1;
+        Serial.println("[SYSTEM WARNING] Câmera falhou ao subir. O sistema rodará apenas como sensor PIR!");
     }
-
-    esp_err_t err = esp_camera_init(&config);
-    if (err != ESP_OK) {
-        Serial.printf("[CAMERA ERROR] Falha ao inicializar: 0x%x\n", err);
-        return;
-    }
-
-    secureClient.setCACert(ca_cert);
-    secureClient.setCertificate(client_cert);
-    secureClient.setPrivateKey(client_key);
-
-    connectToWiFi();
-    syncNTPTime();
-    video_url = "http://" + WiFi.localIP().toString() + "/stream";
     
-    startCameraServer();
-
-    mqttClient.setServer(mqtt_broker, mqtt_port);
-    connectToMQTT();
+    // Alimenta o Watchdog ao concluir a inicialização
+    WatchdogSystem::feed();
+    Serial.println("[SYSTEM] Setup concluído! SentinelNode está ativo e monitorando...");
 }
 
 void loop() {
-    if (WiFi.status() != WL_CONNECTED) {
-        connectToWiFi();
-    }
+    // 1. Alimenta o hardware Watchdog a cada iteração do loop principal
+    WatchdogSystem::feed();
 
-    if (!mqttClient.connected()) {
-        connectToMQTT();
-    }
+    // 2. Executa manutenção periódica de conexões (não-bloqueante)
+    WifiService::handle();
+    MqttService::handle();
 
-    mqttClient.loop();
     unsigned long now = millis();
-    if (now - lastHeartbeat >= 30000) {
+
+    // 3. Gerencia a transição de reconexão do Wi-Fi para disparar eventos
+    if (WifiService::checkJustConnected()) {
+        Serial.println("[SYSTEM] Wi-Fi reconectado. Atualizando parâmetros de rede...");
+        syncNTPTime();
+        updateVideoUrl();
+        WatchdogSystem::feed();
+    }
+
+    // 4. Envio de Heartbeat binário periódico a cada 30 segundos (via MQTT seguro)
+    if (MqttService::isConnected() && (now - lastHeartbeat >= heartbeatInterval)) {
         lastHeartbeat = now;
-        sendHeartbeat();
+        MqttService::sendHeartbeat(0x01, FIRMWARE_MAJOR, FIRMWARE_MINOR, FIRMWARE_PATCH, video_url);
     }
 
-    int pirValue = digitalRead(PIR_PIN);
-    
-    if (pirValue == HIGH && !motionDetected) {
-        Serial.println("[PIR] Alerta! Presença física detectada!");
-        motionDetected = true;
-        sendEvent();
-    } 
-    else if (pirValue == LOW && motionDetected) {
-        Serial.println("[PIR] Área normalizada. Monitoramento ativo...");
-        motionDetected = false;
-    }
-
-    delay(10);
-}
-
-#define PART_BOUNDARY "123456789000000000000987654321"
-static const char* _stream_contentType = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
-static const char* _stream_boundary = "\r\n--" PART_BOUNDARY "\r\n";
-static const char* _stream_part = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
-
-esp_err_t stream_handler(httpd_req_t *req) {
-    camera_fb_t * fb = NULL;
-    esp_err_t res = ESP_OK;
-    size_t _jpg_buf_len = 0;
-    uint8_t * _jpg_buf = NULL;
-    char * part_buf[64];
-
-    res = httpd_resp_set_type(req, _stream_contentType);
-    if (res != ESP_OK) {
-        return res;
-    }
-
-    while (true) {
-        fb = esp_camera_fb_get();
-        if (!fb) {
-            Serial.println("[CAMERA] Falha ao capturar frame");
-            res = ESP_FAIL;
-        } else {
-            _jpg_buf_len = fb->len;
-            _jpg_buf = fb->buf;
-        }
-
-        if (res == ESP_OK) {
-            res = httpd_resp_send_chunk(req, _stream_boundary, strlen(_stream_boundary));
-        }
-        if (res == ESP_OK) {
-            size_t hlen = snprintf((char *)part_buf, 64, _stream_part, _jpg_buf_len);
-            res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
-        }
-        if (res == ESP_OK) {
-            res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-        }
-        if (fb) {
-            esp_camera_fb_return(fb);
-            fb = NULL;
-            _jpg_buf = NULL;
-        } else if (_jpg_buf) {
-            free(_jpg_buf);
-            _jpg_buf = NULL;
-        }
-
-        if (res != ESP_OK) {
-            break;
+    // 5. Processamento de Eventos PIR (Gatilho rápido e assíncrono via interrupção)
+    if (PirDriver::hasTriggered()) {
+        // Verifica se a trava de cooldown expirou antes de enviar nova mensagem
+        if (!motionActive && (now - lastEventTime >= eventCooldown)) {
+            Serial.println("[SYSTEM EVENT] Movimento capturado pelo sensor PIR!");
+            motionActive = true;
+            lastEventTime = now;
+            
+            if (MqttService::isConnected()) {
+                MqttService::sendEvent(0x01, video_url); // Tipo de evento: 0x01 (motion)
+            } else {
+                Serial.println("[SYSTEM WARNING] Alerta gerado, mas descartado: MQTT está offline.");
+            }
         }
     }
-    return res;
-}
 
-void startCameraServer() {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 80;
-
-    httpd_uri_t stream_uri = {
-        .uri       = "/stream",
-        .method    = HTTP_GET,
-        .handler   = stream_handler,
-        .user_ctx  = NULL
-    };
-
-    if (httpd_start(&camera_httpd, &config) == ESP_OK) {
-        httpd_register_uri_handler(camera_httpd, &stream_uri);
-        Serial.printf("[HTTP] Servidor de câmera ativo em: http://%s/stream\n", WiFi.localIP().toString().c_str());
+    // 6. Normalização automática do estado de alerta (tempo mínimo de amostragem lógico)
+    if (motionActive && (now - lastEventTime >= motionHoldTime)) {
+        // Se o sensor físico voltou a repousar, limpa o estado de alerta
+        if (!PirDriver::readStatus()) {
+            Serial.println("[SYSTEM EVENT] Área normalizada. Sensor PIR em repouso.");
+            motionActive = false;
+        }
     }
-}
 
-void connectToWiFi() {
-    Serial.printf("[WiFi] Conectando a %s...\n", ssid);
-    WiFi.begin(ssid, password);
-    
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+    // 7. Escrita de logs de telemetria no console serial a cada 10 segundos
+    if (now - lastTelemetry >= telemetryInterval) {
+        lastTelemetry = now;
+        logTelemetry();
     }
-    Serial.println("\n[WiFi] Conectado com sucesso!");
+
+    // Cede 10ms para que o kernel do FreeRTOS cuide de tarefas secundárias da CPU (ex: Wi-Fi/TLS)
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 void syncNTPTime() {
-    Serial.println("[NTP] Sincronizando relógio do chip via NTP...");
+    Serial.println("[NTP] Sincronizando relógio via NTP...");
     configTime(0, 0, "pool.ntp.org", "b.ntp.br");
+
+    time_t now = time(nullptr);
+    int attempts = 0;
     
-   time_t now = time(nullptr);
-    while (now < 24 * 3600) {
+    // Aguarda sincronização por no máximo 15 segundos
+    while (now < 24 * 3600 && attempts < 30) {
+        // CRÍTICO: alimenta o watchdog enquanto bloqueia aguardando pacotes NTP na rede!
+        WatchdogSystem::feed();
         delay(500);
         Serial.print(".");
         now = time(nullptr);
+        attempts++;
     }
-    Serial.printf("\n[NTP] Relógio sincronizado! Timestamp Unix atual: %ld\n", now);
+    
+    if (now >= 24 * 3600) {
+        Serial.printf("\n[NTP] Relógio sincronizado com sucesso! Unix Epoch: %ld\n", now);
+    } else {
+        Serial.println("\n[NTP WARNING] Tempo limite esgotado para o NTP. Usando relógio interno aproximado.");
+    }
 }
 
-void connectToMQTT() {
-    while (!mqttClient.connected()) {
-        Serial.printf("[MQTT] Tentando conectar na porta segura 8883 (mTLS)...\n");
-        
-        if (mqttClient.connect(device_id)) {
-            Serial.println("[MQTT] Conectado ao Broker Mosquitto com mTLS!");
-        } else {
-            Serial.printf("[MQTT ERROR] Falha de conexão. Código de erro: %d. Tentando em 5 segundos...\n", mqttClient.state());
-            delay(5000);
-        }
-    }
+void updateVideoUrl() {
+    String ipStr = WifiService::getIP();
+    snprintf(video_url, sizeof(video_url), "http://%s/stream", ipStr.c_str());
+    Serial.printf("[SYSTEM] Endpoint de vídeo atualizado: %s\n", video_url);
+}
+
+void logTelemetry() {
+    Serial.printf("[TELEMETRY] Free Heap: %u B | Min Free Heap: %u B | Free PSRAM: %u B | PIR Sensor: %s | Video Stream: %s\n",
+                  ESP.getFreeHeap(),
+                  ESP.getMinFreeHeap(),
+                  ESP.getFreePsram(),
+                  PirDriver::readStatus() ? "DETECTADO" : "LIMPO",
+                  HttpStreamService::isStreaming() ? "EM EXECUÇÃO" : "INATIVO");
 }
