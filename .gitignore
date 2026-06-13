@@ -46,7 +46,7 @@ certs/*.crt
 # Variáveis de ambiente e configs locais
 *.env
 .env
-firmware/private.ini
+firmware/**/private.ini
 
 # Cabeçalhos gerados dinamicamente e chaves locais
 firmware/include/secrets.h
