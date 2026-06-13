@@ -4,12 +4,21 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef __cplusplus
 namespace Protocol {
+#endif
 
+#ifdef __cplusplus
 const uint8_t Magic1 = 0x53;        // 'S'
 const uint8_t Magic2 = 0x4E;        // 'N'
 const uint8_t TypeHeartbeat = 0x01;
 const uint8_t TypeEvent = 0x02;
+#else
+#define Magic1 ((uint8_t)0x53)
+#define Magic2 ((uint8_t)0x4E)
+#define TypeHeartbeat ((uint8_t)0x01)
+#define TypeEvent ((uint8_t)0x02)
+#endif
 
 /**
  * Encodes a heartbeat packet into a binary buffer.
@@ -29,7 +38,7 @@ const uint8_t TypeEvent = 0x02;
  *
  * Returns the total number of bytes written to the buffer.
  */
-inline int encodeHeartbeat(uint8_t* buf, const char* device_id, uint64_t timestamp, uint8_t status, uint8_t major, uint8_t minor, uint8_t patch, const char* stream_url) {
+static inline int encodeHeartbeat(uint8_t* buf, const char* device_id, uint64_t timestamp, uint8_t status, uint8_t major, uint8_t minor, uint8_t patch, const char* stream_url) {
     int offset = 0;
     buf[offset++] = Magic1;
     buf[offset++] = Magic2;
@@ -74,7 +83,7 @@ inline int encodeHeartbeat(uint8_t* buf, const char* device_id, uint64_t timesta
  * 
  * Returns the total number of bytes written to the buffer.
  */
-inline int encodeEvent(uint8_t* buf, const char* device_id, uint64_t timestamp, uint8_t event_type, const char* video_url) {
+static inline int encodeEvent(uint8_t* buf, const char* device_id, uint64_t timestamp, uint8_t event_type, const char* video_url) {
     int offset = 0;
     buf[offset++] = Magic1;
     buf[offset++] = Magic2;
@@ -101,6 +110,8 @@ inline int encodeEvent(uint8_t* buf, const char* device_id, uint64_t timestamp, 
     return offset;
 }
 
+#ifdef __cplusplus
 } // namespace Protocol
+#endif
 
 #endif // PROTOCOL_H

@@ -5,7 +5,27 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+func toCString(pem string) string {
+	lines := strings.Split(pem, "\n")
+	var sb strings.Builder
+	for _, line := range lines {
+		line = strings.ReplaceAll(line, "\r", "")
+		if line == "" {
+			continue
+		}
+		escaped := strings.ReplaceAll(line, "\\", "\\\\")
+		escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+		sb.WriteString(fmt.Sprintf("    \"%s\\n\"\n", escaped))
+	}
+	if sb.Len() == 0 {
+		return "    \"\""
+	}
+	res := sb.String()
+	return res[:len(res)-1]
+}
 
 func main() {
 	certsDir, err := filepath.Abs(filepath.Join("..", "certs"))
@@ -54,17 +74,17 @@ func main() {
 // NAO MODIFIQUE ESTE ARQUIVO DIRETAMENTE! SEUS DADOS SERAO OVERWRITTEN.
 // =========================================================================
 
-const char* ca_cert = R"EOF(
-%s)EOF";
+const char* ca_cert = 
+%s;
 
-const char* client_cert = R"EOF(
-%s)EOF";
+const char* client_cert = 
+%s;
 
-const char* client_key = R"EOF(
-%s)EOF";
+const char* client_key = 
+%s;
 
 #endif // SECRETS_H
-`, caContent, clientContent, keyContent)
+`, toCString(caContent), toCString(clientContent), toCString(keyContent))
 
 	err = ioutil.WriteFile(secretsHeader, []byte(headerContent), 0644)
 	if err != nil {
