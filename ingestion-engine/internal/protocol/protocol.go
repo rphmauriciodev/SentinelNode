@@ -40,11 +40,14 @@ func Decode(data []byte) (byte, interface{}, error) {
 		return 0, nil, err
 	}
 
-	devIdBytes := make([]byte, devIdLen)
-	if _, err := reader.Read(devIdBytes); err != nil {
-		return 0, nil, err
+	deviceID := ""
+	if devIdLen > 0 {
+		devIdBytes := make([]byte, devIdLen)
+		if _, err := reader.Read(devIdBytes); err != nil {
+			return 0, nil, err
+		}
+		deviceID = string(devIdBytes)
 	}
-	deviceID := string(devIdBytes)
 
 	switch pType {
 	case TypeHeartbeat:
@@ -68,11 +71,14 @@ func Decode(data []byte) (byte, interface{}, error) {
 			return 0, nil, err
 		}
 
-		urlBytes := make([]byte, urlLen)
-		if _, err := reader.Read(urlBytes); err != nil {
-			return 0, nil, err
+		streamURL := ""
+		if urlLen > 0 {
+			urlBytes := make([]byte, urlLen)
+			if _, err := reader.Read(urlBytes); err != nil {
+				return 0, nil, err
+			}
+			streamURL = string(urlBytes)
 		}
-		streamURL := string(urlBytes)
 
 		hb := models.Heartbeat{
 			DeviceID:        deviceID,
@@ -98,11 +104,14 @@ func Decode(data []byte) (byte, interface{}, error) {
 			return 0, nil, err
 		}
 
-		urlBytes := make([]byte, urlLen)
-		if _, err := reader.Read(urlBytes); err != nil {
-			return 0, nil, err
+		videoURL := ""
+		if urlLen > 0 {
+			urlBytes := make([]byte, urlLen)
+			if _, err := reader.Read(urlBytes); err != nil {
+				return 0, nil, err
+			}
+			videoURL = string(urlBytes)
 		}
-		videoURL := string(urlBytes)
 
 		event := models.EventMessage{
 			DeviceID:  deviceID,

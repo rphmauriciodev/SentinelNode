@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +24,12 @@ import (
 
 var gatewayURL string
 var durationSeconds int
+
+var activeStreams sync.Map
+
+var pirToCameraMap = map[string]string{
+	"esp32-pir-01": "esp32-cam-01",
+}
 
 func main() {
 	duration := flag.Int("duration", 60, "Duração da gravação em segundos")
@@ -107,10 +114,13 @@ func handleHeartbeat(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	hb, ok := payload.(models.Heartbeat)
-
 	if !ok {
 		log.Println("Erro: payload retornado não é models.Heartbeat")
 		return
+	}
+
+	if hb.StreamURL != "" {
+		activeStreams.Store(hb.DeviceID, hb.StreamURL)
 	}
 
 	log.Printf("[HEARTBEAT] Dispositivo [%s] saudável. Firmware: %s. Status: %s. StreamURL: %s\n",
@@ -118,19 +128,29 @@ func handleHeartbeat(client mqtt.Client, msg mqtt.Message) {
 }
 
 func handleEvent(client mqtt.Client, msg mqtt.Message) {
-
 	_, payload, err := protocol.Decode(msg.Payload())
-
 	if err != nil {
 		log.Printf("Erro ao decodificar binário do evento: %v\n", err)
 		return
 	}
 
 	event, ok := payload.(models.EventMessage)
-
 	if !ok {
 		log.Println("Erro: payload retornado não é models.EventMessage")
 		return
+	}
+
+	if event.VideoURL == "" {
+		if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
+			if val, found := activeStreams.Load(associatedCam); found {
+				event.VideoURL = val.(string)
+				log.Printf("[EVENT MAP] Associando sensor PIR [%s] à stream ativa do ESP-CAM [%s]: %s\n",
+					event.DeviceID, associatedCam, event.VideoURL)
+			} else {
+				log.Printf("[EVENT MAP WARNING] Sensor PIR [%s] disparou, mas o ESP-CAM [%s] não possui stream ativa no cache!\n",
+					event.DeviceID, associatedCam)
+			}
+		}
 	}
 
 	log.Printf("\n=== NOVO ALERTA DE SEGURANÇA RECEBIDO ===")
@@ -144,7 +164,7 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 		log.Printf("AVISO BACKPRESSURE: Fila cheia! Evento da câmera [%s] foi descartado.\n", event.DeviceID)
 	}
 
-	if event.EventType == "motion_detected" {
+	if event.EventType == "motion_detected" && event.VideoURL != "" {
 		go gateway.TriggerRecording(gatewayURL, event.DeviceID, event.VideoURL, durationSeconds)
 	}
 }
