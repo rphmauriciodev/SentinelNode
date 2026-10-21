@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,18 +28,50 @@ var gatewayURL string
 var durationSeconds int
 
 var activeStreams sync.Map
-
-var pirToCameraMap = map[string]string{
-	"esp32-pir-01": "esp32-cam-01",
+var pirToCameraMap = map[string][]string{
+	"esp32-pir-01": {"esp32-cam-01"},
 }
 
+func loadPirMappings() map[string][]string {
+	mapping := map[string][]string{
+		"esp32-pir-01": {"esp32-cam-01"},
+	}
+	envMapping := os.Getenv("PIR_CAMERA_MAPPING")
+	if envMapping == "" {
+		return mapping
+	}
+	pairs := strings.Split(envMapping, ";")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) == 2 {
+			pirID := strings.TrimSpace(parts[0])
+			camList := strings.Split(parts[1], ",")
+			var cams []string
+			for _, c := range camList {
+				c = strings.TrimSpace(c)
+				if c != "" {
+					cams = append(cams, c)
+				}
+			}
+			if pirID != "" && len(cams) > 0 {
+				mapping[pirID] = cams
+			}
+		}
+	}
+	return mapping
+}
 func main() {
 	duration := flag.Int("duration", 60, "Duração da gravação em segundos")
 	flag.Parse()
 	durationSeconds = *duration
+	pirToCameraMap = loadPirMappings()
 
 	log.Println("--- SentinelNode: Ingestion Engine ---")
-
+	log.Printf("Mapeamento PIR -> Câmeras: %+v\n", pirToCameraMap)
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Erro ao carregar configuração: %v", err)
@@ -141,36 +174,44 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 		log.Println("Erro: payload retornado não é models.EventMessage")
 		return
 	}
-
-	targetCamID := event.DeviceID
-	if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
-		targetCamID = associatedCam
-	}
-
-	if event.VideoURL == "" {
-		if val, found := activeStreams.Load(targetCamID); found {
-			event.VideoURL = val.(string)
-			log.Printf("[EVENT MAP] Associando evento de [%s] à stream ativa de [%s]: %s\n",
-				event.DeviceID, targetCamID, event.VideoURL)
-		} else {
-			log.Printf("[EVENT MAP WARNING] Evento de [%s] (alvo [%s]) disparou, mas não possui stream ativa no cache!\n",
-				event.DeviceID, targetCamID)
-		}
+	var targetCameras []string
+	if targets, exists := pirToCameraMap[event.DeviceID]; exists && len(targets) > 0 {
+		targetCameras = targets
+	} else {
+		targetCameras = []string{event.DeviceID}
 	}
 
 	log.Printf("\n=== NOVO ALERTA DE SEGURANÇA RECEBIDO ===")
-	log.Printf("Dispositivo: %s | Câmera Alvo: %s | Evento: %s | Horario: %v",
-		event.DeviceID, targetCamID, event.EventType, event.Timestamp.Format("15:04:05"))
+	log.Printf("Dispositivo: %s | Câmeras Alvo: %v | Evento: %s | Horario: %v",
+		event.DeviceID, targetCameras, event.EventType, event.Timestamp.Format("15:04:05"))
 	log.Printf("=========================================\n")
 
-	select {
-	case worker.EventQueue <- event:
-	default:
-		log.Printf("AVISO BACKPRESSURE: Fila cheia! Evento da câmera [%s] foi descartado.\n", event.DeviceID)
-	}
+	for _, targetCamID := range targetCameras {
+		streamURL := event.VideoURL
+		if streamURL == "" {
+			if val, found := activeStreams.Load(targetCamID); found {
+				streamURL = val.(string)
+				log.Printf("[EVENT MAP] Associando evento de [%s] à stream ativa de [%s]: %s\n",
+					event.DeviceID, targetCamID, streamURL)
+			} else {
+				log.Printf("[EVENT MAP WARNING] Evento de [%s] (alvo [%s]) disparou, mas não possui stream ativa no cache!\n",
+					event.DeviceID, targetCamID)
+			}
+		}
 
-	if event.EventType == "motion_detected" && event.VideoURL != "" {
-		go gateway.TriggerRecording(gatewayURL, targetCamID, event.VideoURL, durationSeconds)
+		camEvent := event
+		camEvent.DeviceID = targetCamID
+		camEvent.VideoURL = streamURL
+
+		select {
+		case worker.EventQueue <- camEvent:
+		default:
+			log.Printf("AVISO BACKPRESSURE: Fila cheia! Evento da câmera [%s] foi descartado.\n", targetCamID)
+		}
+
+		if event.EventType == "motion_detected" && streamURL != "" {
+			go gateway.TriggerRecording(gatewayURL, targetCamID, streamURL, durationSeconds)
+		}
 	}
 }
 

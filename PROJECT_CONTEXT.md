@@ -162,3 +162,21 @@ cd ../firmware/test && ./test_protocol
 cd ../firmware && pio run
 cd ESP-PIR && pio run
 ```
+
+---
+
+## 8. Mapeamento Flexível 1-para-N (PIR para Múltiplas Câmeras)
+
+O `ingestion-engine` suporta disparar múltiplas câmeras simultâneas a partir de um único sensor PIR.
+
+Configuração via variável de ambiente `PIR_CAMERA_MAPPING`:
+```env
+# Formato: pir_id:cam1,cam2;pir_id2:cam3,cam4
+PIR_CAMERA_MAPPING=esp32-pir-01:esp32-cam-01,esp32-cam-02
+```
+
+Quando `esp32-pir-01` detectar presença:
+1. O Ingestion Engine localiza todas as câmeras associadas.
+2. Puxa os streams ativos de cada câmera no cache.
+3. Dispara a gravação independente de cada uma no `media-gateway`.
+4. Ambas as câmeras continuam gravando em paralelo enquanto o PIR mantiver detecção de presença.
