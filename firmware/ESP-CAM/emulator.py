@@ -21,8 +21,35 @@ camera = None
 
 streaming_active = False
 streaming_lock = threading.Lock()
+presence_active = False
+presence_thread = None
+presence_lock = threading.Lock()
 
-mqtt_client = None
+def presence_worker(duration=None):
+    global presence_active, mqtt_client
+    start_time = time.time()
+    while True:
+        with presence_lock:
+            if not presence_active:
+                break
+            if duration and (time.time() - start_time >= duration):
+                presence_active = False
+                break
+        
+        if mqtt_client:
+            local_ip = get_local_ip()
+            stream_url = f"http://{local_ip}:{STREAM_PORT}/stream"
+            timestamp = int(time.time())
+            payload = encode_event(DEVICE_ID, timestamp, 1, stream_url)
+            topic = f"sentinel/devices/{DEVICE_ID}/events"
+            mqtt_client.publish(topic, payload, qos=1)
+            print(f"[EMULATOR PIR] Presença contínua ativa: renovação publicada em {topic}")
+        
+        for _ in range(15):
+            with presence_lock:
+                if not presence_active:
+                    break
+            time.sleep(1)
 
 def get_camera():
     global camera
@@ -70,9 +97,18 @@ def video_stream():
 
 @app.route('/pir/trigger', methods=['GET', 'POST'])
 def trigger_pir():
-    global mqtt_client
+    global mqtt_client, presence_active, presence_thread
     if not mqtt_client:
         return jsonify({"status": "error", "message": "MQTT offline"}), 503
+
+    duration = None
+    if request.is_json and request.json:
+        duration = request.json.get("duration")
+    elif request.args.get("duration"):
+        try:
+            duration = float(request.args.get("duration"))
+        except ValueError:
+            pass
 
     local_ip = get_local_ip()
     stream_url = f"http://{local_ip}:{STREAM_PORT}/stream"
@@ -81,7 +117,43 @@ def trigger_pir():
 
     topic = f"sentinel/devices/{DEVICE_ID}/events"
     mqtt_client.publish(topic, payload, qos=1)
+
+    if duration and duration > 15:
+        with presence_lock:
+            presence_active = True
+            presence_thread = threading.Thread(target=presence_worker, args=(duration,), daemon=True)
+            presence_thread.start()
+        return jsonify({
+            "status": "motion_event_published_with_presence",
+            "topic": topic,
+            "device_id": DEVICE_ID,
+            "duration": duration
+        })
+
     return jsonify({"status": "motion_event_published", "topic": topic, "device_id": DEVICE_ID})
+
+@app.route('/pir/presence/start', methods=['GET', 'POST'])
+def start_presence():
+    global presence_active, presence_thread
+    with presence_lock:
+        if presence_active:
+            return jsonify({"status": "already_active", "presence_active": True})
+        presence_active = True
+        presence_thread = threading.Thread(target=presence_worker, daemon=True)
+        presence_thread.start()
+    return jsonify({"status": "presence_started", "presence_active": True})
+
+@app.route('/pir/presence/stop', methods=['GET', 'POST'])
+def stop_presence():
+    global presence_active
+    with presence_lock:
+        presence_active = False
+    return jsonify({"status": "presence_stopped", "presence_active": False})
+
+@app.route('/pir/presence/status', methods=['GET'])
+def presence_status():
+    with presence_lock:
+        return jsonify({"presence_active": presence_active})
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

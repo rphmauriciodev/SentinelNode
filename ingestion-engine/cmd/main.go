@@ -143,20 +143,19 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	targetCamID := event.DeviceID
-	if event.VideoURL == "" {
-		if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
-			targetCamID = associatedCam
-			if val, found := activeStreams.Load(associatedCam); found {
-				event.VideoURL = val.(string)
-				log.Printf("[EVENT MAP] Associando sensor PIR [%s] à stream ativa do ESP-CAM [%s]: %s\n",
-					event.DeviceID, associatedCam, event.VideoURL)
-			} else {
-				log.Printf("[EVENT MAP WARNING] Sensor PIR [%s] disparou, mas o ESP-CAM [%s] não possui stream ativa no cache!\n",
-					event.DeviceID, associatedCam)
-			}
-		}
-	} else if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
+	if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
 		targetCamID = associatedCam
+	}
+
+	if event.VideoURL == "" {
+		if val, found := activeStreams.Load(targetCamID); found {
+			event.VideoURL = val.(string)
+			log.Printf("[EVENT MAP] Associando evento de [%s] à stream ativa de [%s]: %s\n",
+				event.DeviceID, targetCamID, event.VideoURL)
+		} else {
+			log.Printf("[EVENT MAP WARNING] Evento de [%s] (alvo [%s]) disparou, mas não possui stream ativa no cache!\n",
+				event.DeviceID, targetCamID)
+		}
 	}
 
 	log.Printf("\n=== NOVO ALERTA DE SEGURANÇA RECEBIDO ===")

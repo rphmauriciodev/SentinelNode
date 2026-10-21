@@ -15,13 +15,14 @@
 #include "../../include/secrets.h"
 #include "../../include/protocol.h"
 
-#define SENSOR_PIR       27               // GPIO 27 para o PIR
-#define LIMITE_TEMPO_MS  10000            // Tempo de calmaria (10 segundos)
-#define DEVICE_ID        "esp32-pir-01"  // ID único deste dispositivo
+#define SENSOR_PIR             27
+#define LIMITE_TEMPO_MS        10000
+#define INTERVALO_RENOVACAO_MS 15000
+#define DEVICE_ID              "esp32-pir-01"
 
-// Timers não-bloqueantes
 static uint32_t last_heartbeat = 0;
 static uint32_t last_telemetry = 0;
+static uint32_t last_event_ms = 0;
 static uint32_t tempo_anterior_ms = 0;
 static bool cronometro_rodando = false;
 
@@ -229,8 +230,13 @@ void loop_c() {
     if (movimento_detectado) {
         if (!motion_active) {
             motion_active = true;
+            last_event_ms = now;
             printf("[MOVIMENTO] Detectado! Enviando sinal MQTT...\n");
             enviar_evento(1); 
+        } else if (now - last_event_ms >= INTERVALO_RENOVACAO_MS) {
+            last_event_ms = now;
+            printf("[MOVIMENTO SUSTENTADO] Presença contínua detectada! Renovando sinal MQTT...\n");
+            enviar_evento(1);
         }
         tempo_anterior_ms = now;
         cronometro_rodando = true;
@@ -242,7 +248,7 @@ void loop_c() {
                 motion_active = false;
                 cronometro_rodando = false;
                 printf("[TIMER] %d s sem movimento. Enviando fim de alerta MQTT...\n", LIMITE_TEMPO_MS / 1000);
-                enviar_evento(2); // 2 = motion_ended (repouso)
+                enviar_evento(2);
             } else {
                 tempo_anterior_ms = now;
             }

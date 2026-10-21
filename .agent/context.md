@@ -83,3 +83,22 @@ CREATE TABLE IF NOT EXISTS security_events (
     timestamp TIMESTAMP NOT NULL
 );
 ```
+
+---
+
+## 5. Ciclo de Vida de Presença Contínua e Janela Deslizante
+
+### Máquina de Estados de Detecção na Borda
+1. **Transição de Repouso para Movimento:**
+   * Entrada de presença física detectada no GPIO (`PirDriver::readStatus() == HIGH` ou `PirDriver::hasTriggered() == true`).
+   * Disparo imediato do pacote binário de evento tipo `0x01` (`motion_detected`) via MQTT mTLS.
+   * Estado lógico `motionActive` assume `true` e `lastEventTime = now`.
+2. **Sustentação de Presença Contínua:**
+   * Enquanto a presença persistir (sensor físico em nível alto ou novos gatilhos):
+   * A borda (ESP32-CAM e ESP-PIR) transmite um evento de renovação tipo `0x01` a cada **15 segundos** (`eventCooldown` / `INTERVALO_RENOVACAO_MS`).
+   * O `media-gateway` recebe `POST /record` pelo `ingestion-engine` e renova o temporizador de tolerância de **30 segundos** via canal interno não-bloqueante (`s.resetChan`).
+   * A gravação do FFmpeg segue ativa no mesmo arquivo MP4 sem interrupções nem fragmentação de arquivos.
+3. **Normalização e Encerramento Gracioso:**
+   * Quando a área é desocupada (`PirDriver::readStatus() == LOW`), a borda aguarda o período de calmaria de **10 segundos** (`motionHoldTime` / `LIMITE_TEMPO_MS`) antes de normalizar `motionActive = false`.
+   * Sem novos eventos no `media-gateway`, o temporizador de tolerância (30s) expira graciosamente.
+   * O controlador envia `q` para o `stdin` do FFmpeg, assegurando a escrita do átomo `moov` e salvando o arquivo MP4 íntegro com status `completed`.

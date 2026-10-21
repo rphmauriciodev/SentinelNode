@@ -38,11 +38,11 @@ Ao interagir ou modificar este repositório, você DEVE respeitar rigorosamente 
 2. **Gravação Orientada a Eventos PIR:**
    * O fluxo contínuo ao vivo fica em memória para os visualizadores.
    * Nenhuma gravação deve ser persistida em disco sem que haja evento de detecção de movimento válido recebido via MQTT.
-3. **Janela Deslizante (Sliding Window de 30s):**
+3. **Janela Deslizante (Sliding Window de 30s) e Presença Contínua:**
    * O início da gravação ocorre no primeiro evento PIR.
-   * Cada novo evento recebido durante uma gravação ativa deve renovar o temporizador de tolerância (30 segundos).
+   * Enquanto o PIR continuar percebendo presença (sensor em nível alto ou novos disparos), a borda (ESP32-CAM / ESP-PIR) renova o evento MQTT a cada 15s.
+   * Cada novo evento recebido durante uma gravação ativa reinicia o temporizador de tolerância (30 segundos), impedindo que a gravação pare enquanto a presença persistir.
    * Não fragmente o vídeo em múltiplos arquivos para o mesmo período contínuo de atividade.
-4. **Finalização Graciosa do FFmpeg:**
    * O encerramento de gravações deve enviar o comando `q` pelo `stdin` do processo (ou `SIGINT`), aguardando a gravação correta do átomo `moov` (MP4) para evitar corrupção de arquivos de vídeo.
 5. **Protocolo Binário de Rede:**
    * Mensagens MQTT utilizam Magic Number `0x53 0x4E` ("SN"), timestamp `uint64` Big-Endian, tipo `0x01` (Heartbeat) ou `0x02` (Evento PIR).

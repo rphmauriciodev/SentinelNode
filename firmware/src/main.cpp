@@ -36,12 +36,10 @@ unsigned long lastHeartbeat = 0;
 unsigned long lastTelemetry = 0;
 unsigned long lastEventTime = 0;
 
-// Constants timing
-const unsigned long heartbeatInterval = 30000; // 30 segundos
-const unsigned long telemetryInterval = 10000; // 10 segundos
-const unsigned long eventCooldown     = 15000; // 15 segundos (debounce de envio)
-const unsigned long motionHoldTime    = 10000; // 10 segundos (tempo mínimo de trava)
-
+const unsigned long heartbeatInterval = 30000;
+const unsigned long telemetryInterval = 10000;
+const unsigned long eventCooldown     = 15000;
+const unsigned long motionHoldTime    = 10000;
 // Forward declarations
 void printResetReason();
 void syncNTPTime();
@@ -132,31 +130,40 @@ void loop() {
         MqttService::sendHeartbeat(0x01, FIRMWARE_MAJOR, FIRMWARE_MINOR, FIRMWARE_PATCH, video_url);
     }
 
-    // 5. Processamento de Eventos PIR (Gatilho rápido e assíncrono via interrupção validada)
-    if (PirDriver::hasTriggered()) {
-        // Verifica se a trava de cooldown expirou antes de enviar nova mensagem
-        if (!motionActive && (now - lastEventTime >= eventCooldown)) {
-            Serial.println("[SYSTEM EVENT] Movimento validado sustentado pelo sensor PIR!");
-            motionActive = true;
-            lastEventTime = now;
-            
-            if (MqttService::isConnected()) {
-                MqttService::sendEvent(0x01, video_url); // Tipo de evento: 0x01 (motion)
-            } else {
-                Serial.println("[SYSTEM WARNING] Alerta gerado, mas descartado: MQTT está offline.");
+    bool pirTriggered = PirDriver::hasTriggered();
+    bool pirPresenceActive = PirDriver::readStatus();
+
+    if (!motionActive) {
+        if (pirTriggered || pirPresenceActive) {
+            if (now - lastEventTime >= eventCooldown) {
+                Serial.println("[SYSTEM EVENT] Movimento validado sustentado pelo sensor PIR!");
+                motionActive = true;
+                lastEventTime = now;
+                
+                if (MqttService::isConnected()) {
+                    MqttService::sendEvent(0x01, video_url);
+                } else {
+                    Serial.println("[SYSTEM WARNING] Alerta gerado, mas descartado: MQTT está offline.");
+                }
+            }
+        }
+    } else {
+        if (pirPresenceActive || pirTriggered) {
+            if (now - lastEventTime >= eventCooldown) {
+                Serial.println("[SYSTEM EVENT] Presença contínua sustentada no sensor PIR! Renovando gravação...");
+                lastEventTime = now;
+                
+                if (MqttService::isConnected()) {
+                    MqttService::sendEvent(0x01, video_url);
+                }
+            }
+        } else {
+            if (now - lastEventTime >= motionHoldTime) {
+                Serial.println("[SYSTEM EVENT] Área normalizada. Sensor PIR em repouso.");
+                motionActive = false;
             }
         }
     }
-
-    // 6. Normalização automática do estado de alerta (tempo mínimo de amostragem lógico)
-    if (motionActive && (now - lastEventTime >= motionHoldTime)) {
-        // Se o sensor físico voltou a repousar, limpa o estado de alerta
-        if (!PirDriver::readStatus()) {
-            Serial.println("[SYSTEM EVENT] Área normalizada. Sensor PIR em repouso.");
-            motionActive = false;
-        }
-    }
-
     // 7. Escrita de logs de telemetria no console serial a cada 10 segundos
     if (now - lastTelemetry >= telemetryInterval) {
         lastTelemetry = now;

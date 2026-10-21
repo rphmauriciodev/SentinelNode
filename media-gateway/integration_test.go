@@ -231,6 +231,39 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		}
 	})
 
+	t.Run("TESTE 5B: Presença contínua mantida pelo PIR não interrompe a gravação enquanto houver detecção sustentada", func(t *testing.T) {
+		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
+		resp, _ := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		var res map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		if res["status"] != "recording_started" {
+			t.Fatalf("Esperava recording_started para nova sessão, obteve %s", res["status"])
+		}
+
+		for i := 1; i <= 4; i++ {
+			time.Sleep(200 * time.Millisecond)
+			respLoop, _ := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+			var resLoop map[string]string
+			_ = json.NewDecoder(respLoop.Body).Decode(&resLoop)
+			if resLoop["status"] != "recording_extended" {
+				t.Fatalf("Esperava recording_extended na renovação %d, obteve %s", i, resLoop["status"])
+			}
+			if !recCtrl.IsRecording("esp32-cam-01") {
+				t.Fatalf("Gravação deveria continuar ativa durante presença contínua (iteração %d)", i)
+			}
+		}
+
+		time.Sleep(200 * time.Millisecond)
+		if !recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria continuar ativa dentro da tolerância renovada")
+		}
+
+		time.Sleep(300 * time.Millisecond)
+		if recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria ter sido finalizada após cessar a presença e expirar a tolerância")
+		}
+	})
+
 	t.Run("TESTE 6: Dois ou mais espectadores conseguem acessar o mesmo fluxo sem depender de conexões independentes com a câmera", func(t *testing.T) {
 		ctx1, cancel1 := context.WithTimeout(context.Background(), 250*time.Millisecond)
 		defer cancel1()

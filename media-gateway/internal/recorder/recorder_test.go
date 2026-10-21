@@ -151,6 +151,45 @@ func TestRecorder_EventBeforeToleranceKeepsActive(t *testing.T) {
 	}
 }
 
+func TestRecorder_ContinuousPresenceKeepsRecording(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewMetadataStore(tmpDir)
+	tolerance := 300 * time.Millisecond
+	rc := NewRecordingController(tmpDir, tolerance, store)
+	rc.SetCmdExecutor(mockExecutor)
+	defer rc.Shutdown()
+
+	status, err := rc.TriggerEvent("esp32-cam-01", "http://127.0.0.1:8080/live/esp32-cam-01")
+	if err != nil || status != "recording_started" {
+		t.Fatalf("Esperava gravação iniciada: %v, status=%s", err, status)
+	}
+	for i := 1; i <= 5; i++ {
+		time.Sleep(150 * time.Millisecond)
+		st, err := rc.TriggerEvent("esp32-cam-01", "http://127.0.0.1:8080/live/esp32-cam-01")
+		if err != nil || st != "recording_extended" {
+			t.Fatalf("Renovação %d falhou: %v, status=%s", i, err, st)
+		}
+		if !rc.IsRecording("esp32-cam-01") {
+			t.Fatalf("Gravação deveria continuar ativa durante presença contínua (iteração %d)", i)
+		}
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	if !rc.IsRecording("esp32-cam-01") {
+		t.Fatal("A gravação ainda deveria estar ativa dentro da tolerância renovada")
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	if rc.IsRecording("esp32-cam-01") {
+		t.Fatal("A gravação deveria ter finalizado após o término da presença e da tolerância")
+	}
+
+	metas := store.GetAll()
+	if len(metas) != 1 || metas[0].Status != "completed" {
+		t.Fatalf("Esperava exatamente 1 gravação completed para todo o período de presença, obteve: %+v", metas)
+	}
+}
+
 func TestRecorder_ShutdownGracefullyStopsRecordings(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewMetadataStore(tmpDir)
