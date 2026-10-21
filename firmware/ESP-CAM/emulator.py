@@ -4,7 +4,7 @@ import time
 import socket
 import struct
 import threading
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 import cv2
 import paho.mqtt.client as mqtt
 

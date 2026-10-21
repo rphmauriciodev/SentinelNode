@@ -35,8 +35,9 @@ Thumbs.db
 
 # Logs e arquivos temporários
 *.log
+logs/
+.run/
 tmp/
-
 .venv/
 **/.venv/
 
