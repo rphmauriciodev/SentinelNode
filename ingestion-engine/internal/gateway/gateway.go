@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/models"
 )
@@ -24,9 +26,8 @@ func TriggerRecording(gatewayURL string, deviceID string, videoURL string, durat
 		return
 	}
 
-	log.Printf("[HTTP REST] Enviando solicitação de gravação para o Media Gateway (%s)...\n", gatewayURL)
-
-	response, err := http.Post(gatewayURL, "application/json", bytes.NewBuffer(jsonData))
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Post(gatewayURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("Erro ao enviar solicitação de gravação para o gateway: %v\n", err)
 		return
@@ -42,4 +43,32 @@ func TriggerRecording(gatewayURL string, deviceID string, videoURL string, durat
 	}
 
 	log.Printf("[API Media Gateway] Status da gravação retornado: %s\n", result["status"])
+}
+
+func RegisterStream(gatewayURL string, deviceID string, streamURL string) {
+	baseURL := strings.TrimSuffix(gatewayURL, "/record")
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	registerEndpoint := baseURL + "/stream/register"
+
+	payload := map[string]string{
+		"device_id":  deviceID,
+		"stream_url": streamURL,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Erro ao serializar registro de stream: %v\n", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(registerEndpoint, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("[API Media Gateway] Aviso: Gateway indisponível para registro de stream: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[API Media Gateway] Câmera [%s] registrada no Media Gateway (%s): HTTP %s\n",
+		deviceID, registerEndpoint, resp.Status)
 }

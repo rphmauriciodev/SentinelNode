@@ -86,7 +86,7 @@ func TestDecode_Event(t *testing.T) {
 	buf.WriteByte(byte(len(devID)))
 	buf.WriteString(devID)
 
-	buf.WriteByte(1) // event_type (1 = motion_detected)
+	buf.WriteByte(1)
 
 	url := ""
 	binary.Write(buf, binary.BigEndian, uint16(len(url)))

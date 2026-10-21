@@ -121,6 +121,7 @@ func handleHeartbeat(client mqtt.Client, msg mqtt.Message) {
 
 	if hb.StreamURL != "" {
 		activeStreams.Store(hb.DeviceID, hb.StreamURL)
+		go gateway.RegisterStream(gatewayURL, hb.DeviceID, hb.StreamURL)
 	}
 
 	log.Printf("[HEARTBEAT] Dispositivo [%s] saudável. Firmware: %s. Status: %s. StreamURL: %s\n",

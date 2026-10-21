@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// Testa se o codificador de heartbeat gera os bytes corretos de acordo com a especificação
 func TestEncodeHeartbeat(t *testing.T) {
 	deviceID := "camera-01"
 	timestamp := time.Unix(1715974000, 0)
@@ -16,7 +15,6 @@ func TestEncodeHeartbeat(t *testing.T) {
 
 	bytesOut := EncodeHeartbeat(deviceID, timestamp, status, firmware)
 
-	// Validações básicas de cabeçalho
 	if len(bytesOut) < 12 {
 		t.Fatalf("pacote retornado muito curto: %d bytes", len(bytesOut))
 	}
@@ -29,7 +27,6 @@ func TestEncodeHeartbeat(t *testing.T) {
 		t.Errorf("tipo de pacote incorreto: %x", bytesOut[2])
 	}
 
-	// Valida se o timestamp foi gravado corretamente em Big Endian na posição certa (offset 3 a 11)
 	var parsedTime int64
 	reader := bytes.NewReader(bytesOut[3:11])
 	if err := binary.Read(reader, binary.BigEndian, &parsedTime); err != nil {
@@ -43,7 +40,7 @@ func TestEncodeHeartbeat(t *testing.T) {
 
 func TestEncodeEvent(t *testing.T) {
 	deviceID := "camera-01"
-	now := time.Unix(1715974000, 0) // Usar hora fixa evita diferenças de milissegundos
+	now := time.Unix(1715974000, 0)
 	typeOfEvent := "motion_detected"
 	mediaURL := "http://localhost:8080/record/12345.mp4"
 
@@ -59,7 +56,6 @@ func TestEncodeEvent(t *testing.T) {
 		t.Fatalf("Tipo de pacote inválido. Esperado 0x02, obtido 0x%x", packet[2])
 	}
 
-	// 1. Validar o Timestamp (int64)
 	timeBuf := make([]byte, 8)
 	copy(timeBuf, packet[3:11])
 	var unixTime int64

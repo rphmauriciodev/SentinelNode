@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SentinelNode 2.0 - Central de Vigilância</title>
+  <style>
+    :root {
+      --bg-dark: #0f141c;
+      --card-bg: #18202c;
+      --card-border: #243142;
+      --accent: #00d2ff;
+      --accent-glow: rgba(0, 210, 255, 0.2);
+      --danger: #ff4757;
+      --danger-glow: rgba(255, 71, 87, 0.25);
+      --success: #2ed573;
+      --warning: #ffa502;
+      --text-main: #f1f2f6;
+      --text-muted: #8395a7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .brand span.tag {
+      background: var(--accent-glow);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .video-container {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .overlay-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .overlay-rec {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      background: var(--danger-glow);
+      border: 1px solid var(--danger);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      animation: pulse 1.5s infinite;
+    }
+    .rec-active { display: flex !important; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+    }
+    .dot.green { background: var(--success); }
+    .dot.yellow { background: var(--warning); }
+    .dot.red { background: var(--danger); }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 14px;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-label { color: var(--text-muted); }
+    .metric-val { font-weight: 600; font-family: monospace; }
+    .btn {
+      background: var(--accent);
+      color: #0f141c;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    .table-container {
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    th {
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    .status-badge {
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .status-completed { background: rgba(46, 213, 115, 0.2); color: var(--success); }
+    .status-recording { background: var(--danger-glow); color: var(--danger); }
+    .status-failed { background: rgba(255, 71, 87, 0.2); color: var(--danger); }
+    #modalPlayer {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.85);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(8px);
+    }
+    .modal-content {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      width: 90%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    video {
+      width: 100%;
+      border-radius: 8px;
+      background: #000;
+      max-height: 60vh;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>🛡️ SentinelNode 2.0</h1>
+      <span class="tag">Vigilância Pessoal</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <button class="btn" onclick="triggerTestEvent()">⚡ Simular Evento PIR</button>
+      <span id="globalClock" style="font-family: monospace; font-size: 13px; color: var(--text-muted);">--:--:--</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- Visualização ao Vivo -->
+    <div class="card">
+      <div class="card-title">
+        <span>Transmissão Contínua ao Vivo (Broadcaster Central)</span>
+        <button class="btn" style="padding: 4px 10px; font-size: 12px;" onclick="toggleFullscreen()">Tela Cheia</button>
+      </div>
+      <div class="video-container" id="videoBox">
+        <img id="liveFeed" src="/live?device_id=esp32-cam-01" alt="Fluxo da Câmera">
+        <div class="overlay-badge">
+          <span class="dot green" id="statusDot"></span>
+          <span id="streamStatus">STREAMING</span>
+        </div>
+        <div class="overlay-rec" id="recBadge">
+          <span class="dot red"></span>
+          <span>GRAVANDO</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telemetria do Sistema -->
+    <div class="card">
+      <div class="card-title">
+        <span>Telemetria Operacional</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Câmera Ativa</span>
+        <span class="metric-val" id="camDeviceID">esp32-cam-01</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Estado de Conexão</span>
+        <span class="metric-val" id="camStatus">Conectando...</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Taxa de Quadros (FPS)</span>
+        <span class="metric-val" id="camFPS">-- FPS</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Total de Frames Ingeridos</span>
+        <span class="metric-val" id="camFrames">0</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Espectadores Conectados</span>
+        <span class="metric-val" id="camViewers">0</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Janela de Tolerância</span>
+        <span class="metric-val">30s (Sliding Window)</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Ingestão na Borda (ESP32)</span>
+        <span class="metric-val" style="color: var(--success);">1 Conexão Única</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Catálogo de Gravações Persistidas -->
+  <div class="card">
+    <div class="card-title">
+      <span>Gravações de Vídeo Orientadas a Eventos</span>
+      <span style="font-size: 12px; color: var(--text-muted);" id="recCount">0 gravações</span>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Arquivo</th>
+            <th>Câmera</th>
+            <th>Início</th>
+            <th>Término</th>
+            <th>Duração</th>
+            <th>Tamanho</th>
+            <th>Estado</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody id="recordingsTableBody">
+          <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Nenhuma gravação persistida ainda.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal de Reprodução de Vídeo -->
+  <div id="modalPlayer">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">Reprodução de Vídeo</h3>
+        <button class="btn btn-danger" style="padding: 4px 8px;" onclick="closeModal()">✕</button>
+      </div>
+      <video id="videoPlayer" controls autoplay></video>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <a id="downloadBtn" class="btn" href="#" download>Baixar MP4</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('globalClock').innerText = now.toLocaleTimeString('pt-BR');
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/status');
+        const data = await res.json();
+        if (data.cameras && data.cameras.length > 0) {
+          const cam = data.cameras[0];
+          document.getElementById('camDeviceID').innerText = cam.device_id;
+          document.getElementById('camStatus').innerText = cam.status.toUpperCase();
+          document.getElementById('camFPS').innerText = cam.fps.toFixed(1) + ' FPS';
+          document.getElementById('camFrames').innerText = cam.frame_count.toLocaleString();
+          document.getElementById('camViewers').innerText = cam.active_viewers;
+
+          const dot = document.getElementById('statusDot');
+          const streamText = document.getElementById('streamStatus');
+          if (cam.status === 'streaming') {
+            dot.className = 'dot green';
+            streamText.innerText = 'STREAMING (' + cam.fps.toFixed(1) + ' FPS)';
+          } else if (cam.status === 'connecting') {
+            dot.className = 'dot yellow';
+            streamText.innerText = 'CONECTANDO...';
+          } else {
+            dot.className = 'dot red';
+            streamText.innerText = 'OFFLINE';
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao consultar status:', e);
+      }
+    }
+
+    async function pollRecordings() {
+      try {
+        const res = await fetch('/api/recordings');
+        const list = await res.json();
+        const tbody = document.getElementById('recordingsTableBody');
+        const recBadge = document.getElementById('recBadge');
+        
+        let isAnyRecording = false;
+
+        if (!list || list.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Nenhuma gravação persistida ainda.</td></tr>';
+          document.getElementById('recCount').innerText = '0 gravações';
+          recBadge.classList.remove('rec-active');
+          return;
+        }
+
+        document.getElementById('recCount').innerText = list.length + ' gravações';
+        let html = '';
+
+        for (const item of list) {
+          if (item.status === 'recording') {
+            isAnyRecording = true;
+          }
+          const start = new Date(item.started_at).toLocaleTimeString('pt-BR');
+          const end = item.ended_at && item.status !== 'recording' ? new Date(item.ended_at).toLocaleTimeString('pt-BR') : '--:--:--';
+          const dur = item.duration_seconds > 0 ? item.duration_seconds.toFixed(1) + 's' : '--';
+          const size = item.size_bytes > 0 ? (item.size_bytes / (1024 * 1024)).toFixed(2) + ' MB' : '--';
+
+          let statusClass = 'status-completed';
+          let statusText = 'FINALIZADO';
+          if (item.status === 'recording') {
+            statusClass = 'status-recording';
+            statusText = 'GRAVANDO';
+          } else if (item.status === 'failed') {
+            statusClass = 'status-failed';
+            statusText = 'FALHOU';
+          }
+
+          html += `<tr>
+            <td style="font-family: monospace;">${item.file_name}</td>
+            <td>${item.device_id}</td>
+            <td>${start}</td>
+            <td>${end}</td>
+            <td>${dur}</td>
+            <td>${size}</td>
+            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+            <td>
+              ${item.status === 'completed' ? `<button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="playVideo('/recordings/${item.file_name}', '${item.file_name}')">▶ Assistir</button>` : ''}
+            </td>
+          </tr>`;
+        }
+        tbody.innerHTML = html;
+
+        if (isAnyRecording) {
+          recBadge.classList.add('rec-active');
+        } else {
+          recBadge.classList.remove('rec-active');
+        }
+      } catch (e) {
+        console.error('Erro ao consultar gravações:', e);
+      }
+    }
+
+    async function triggerTestEvent() {
+      try {
+        const res = await fetch('/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device_id: 'esp32-cam-01',
+            video_url: 'http://127.0.0.1:8080/live/esp32-cam-01',
+            duration_seconds: 30
+          })
+        });
+        const result = await res.json();
+        alert('Evento PIR disparado! Status: ' + result.status);
+        pollRecordings();
+      } catch (e) {
+        alert('Erro ao disparar evento de teste: ' + e);
+      }
+    }
+
+    function playVideo(url, name) {
+      document.getElementById('modalTitle').innerText = 'Reproduzindo: ' + name;
+      const player = document.getElementById('videoPlayer');
+      player.src = url;
+      document.getElementById('downloadBtn').href = url;
+      document.getElementById('modalPlayer').style.display = 'flex';
+      player.play();
+    }
+
+    function closeModal() {
+      const player = document.getElementById('videoPlayer');
+      player.pause();
+      player.src = '';
+      document.getElementById('modalPlayer').style.display = 'none';
+    }
+
+    function toggleFullscreen() {
+      const elem = document.getElementById('videoBox');
+      if (!document.fullscreenElement) {
+        elem.requestFullscreen().catch(err => alert(err.message));
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    setInterval(pollStatus, 2000);
+    setInterval(pollRecordings, 2000);
+    pollStatus();
+    pollRecordings();
+  </script>
+</body>
+</html>

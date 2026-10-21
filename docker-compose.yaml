@@ -20,7 +20,7 @@ services:
       POSTGRES_PASSWORD: sentinel_password
       POSTGRES_DB: sentinel_db
     ports:
-      - "5432:5432"
+      - "${SENTINEL_DB_PORT:-5435}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: always

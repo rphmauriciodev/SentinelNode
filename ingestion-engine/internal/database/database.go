@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"log"
 
-	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/models"
 	_ "github.com/lib/pq"
+	"github.com/rphmauriciodev/SentinelNode/ingestion-engine/internal/models"
 )
 
 var DB *sql.DB
@@ -30,7 +30,7 @@ func Init(connStr string) {
 		video_url TEXT NOT NULL,
 		timestamp TIMESTAMP NOT NULL
 	);`
-	
+
 	_, err = DB.Exec(query)
 	if err != nil {
 		log.Printf("⚠️ Aviso: Não foi possível criar/verificar a tabela no banco (banco offline?): %v\n", err)

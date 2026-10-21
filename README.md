@@ -1,67 +1,60 @@
-# SentinelNode 🛡️📹
+# SentinelNode 2.0 🛡️📹
 
-**SentinelNode** é um ecossistema de vigilância de borda (IoT) e ingestão centralizada de vídeo de nível industrial. Projetado para rodar em hardware de baixo consumo (como o módulo físico **ESP32-CAM**) e servidores locais de home lab (como Proxmox), o sistema oferece criptografia de ponta a ponta, comunicação binária compacta de altíssima velocidade e persistência de dados tolerante a falhas críticas.
+**SentinelNode 2.0** é um ecossistema de vigilância pessoal e monitoramento de borda (IoT) de nível industrial, desenvolvido em Go e C++ para ESP32-CAM e servidores locais (ex: Proxmox LXC).
 
-O ecossistema é composto por:
-*   **firmware/**: Código C++ nativo para a placa **ESP32-CAM** (compatível com os sensores OV3660 e OV2640) integrado com sensor de presença PIR físico.
-*   **edge-agent/**: Um simulador de câmera de alta fidelidade desenvolvido em Go (ótimo para testes rápidos sem hardware).
-*   **ingestion-engine/**: O motor central que gerencia heartbeats, filas concorrentes de backpressure e persistência resiliente.
-*   **media-gateway/**: O gateway de processamento que gerencia spawn assíncrono de processos FFmpeg para gravação de fluxos de vídeo locais.
+O sistema resolve de forma definitiva o problema de gargalo do ESP32-CAM (que suporta apenas 1 cliente de vídeo simultâneo), introduzindo **ingestão centralizada contínua com Broadcaster em memória**, **gravação orientada a eventos PIR com janela de tolerância deslizante (Sliding Window de 30s)** e uma **interface web de vigilância pessoal com player ao vivo e reprodução de gravações**.
 
 ---
 
-## 🏗️ Arquitetura do Sistema
+## 🏗️ Arquitetura do Sistema Sentinel 2.0
 
 ```mermaid
 graph TD
-    subgraph Edge ["Borda (ESP32-CAM Físico / Simulador Go)"]
-        Agent[Edge Agent / ESP32-CAM] -->|Encoder Binário| BinData[Payload Criptografado]
-        Agent -->|Stream HTTP MJPEG| VideoStream[http://IP_DA_CAMERA/stream]
+    subgraph Edge ["Borda (ESP32-CAM / ESP-PIR)"]
+        Cam[ESP32-CAM Físico / Emulador] -->|1 Conexão Única HTTP MJPEG| Ingest[Ingestão Centralizada Go]
+        PIR[Sensor PIR / ESP-PIR] -->|mTLS Porta 8883| Broker[Mosquitto Broker]
     end
 
-    subgraph Infra ["Segurança & Rede (Docker Compose)"]
-        BinData -->|mTLS Porta 8883| Broker[Mosquitto MQTT Broker]
-    end
+    subgraph Backend ["Servidor & Mídia (Go)"]
+        Broker -->|Tópicos MQTT| Engine[Ingestion Engine]
+        Engine -->|Registro de Stream & Alertas| Gateway[Media Gateway :8080]
+        Engine -->|Backoff Exponencial| DB[(PostgreSQL 15)]
 
-    subgraph Backend ["Servidor & Ingestão (Go)"]
-        Broker -->|Fila de Backpressure| Engine[Ingestion Engine]
-        Engine -->|Exponential Backoff| DB[(PostgreSQL 15)]
-        Engine -->|REST Async Trigger| Gateway[Media Gateway]
-        Gateway -->|FFmpeg Grab| VideoStream
-        Gateway -->|Salva Vídeo MP4| Videos[Gravações de Vídeo]
+        Ingest --> Broadcaster[Broadcaster em Memória]
+        Broadcaster -->|Múltiplos Espectadores| Browser[Navegadores / Web UI]
+        Broadcaster -->|Stream Local 127.0.0.1| Recorder[Recording Controller]
+        Recorder -->|Sliding Window 30s + FFmpeg| MP4[Arquivos MP4 Persistidos]
     end
 ```
 
 ---
 
-## 🌟 Principais Recursos
+## 🌟 Principais Recursos da Versão 2.0
 
-- **Protocolo Binário de Baixo Nível Customizado**: Elimina a verbosidade do JSON, compactando telemetria e alertas em bytes puros. Utiliza *Magic Numbers* (`0x53 0x4E` - "SN") para descarte imediato de tráfego invasor ou corrompido na camada de rede.
-- **Segurança Mútua TLS (mTLS)**: Criptografia e autenticação por hardware. O Broker MQTT Mosquitto roda na porta segura **`8883`** exigindo que todos os clientes apresentem certificados digitais assinados por uma Autoridade Certificadora (CA) local confiável.
-- **Injeção de Credenciais Segura (PlatformIO)**: Zero segredos e senhas de Wi-Fi no repositório. O firmware utiliza injeção de build flags via arquivo `private.ini` (oculto no `.gitignore`).
-- **Resolução de IP Dinâmico via mDNS**: O ESP32-CAM localiza o servidor do Mosquitto dinamicamente usando o hostname do computador (ex: `computador.local`) eliminando falhas de conexão causadas por oscilação de IP DHCP do roteador.
-- **Fila Concorrente & Backpressure**: O backend gerencia o consumo de eventos com buffers em memória para evitar picos de uso de memória RAM.
-- **Resiliência Extrema**: Worker inteligente que insere dados no PostgreSQL utilizando política de **Backoff Exponencial** automático. Se o banco de dados cair, os dados acumulam com segurança na RAM e são gravados imediatamente após o restabelecimento da conexão.
-- **Media Gateway Assíncrono**: Gerenciador de gravação de vídeo concorrente. Spawn de processos FFmpeg (`os/exec`) para captura de streams RTSP e HTTP MJPEG de câmeras reais com fallback inteligente e dinâmico caso a câmera esteja offline.
-- **Configurações via Viper & `.env`**: Injeção dinâmica de parâmetros de infraestrutura, conexões e caminhos de arquivos.
-- **100% Testado**: Cobertura de testes unitários nativos para garantir a integridade matemática da serialização e decodificação dos bytes de rede.
-
----
-
-## 🛠️ Pré-requisitos
-
-Para executar o ecossistema completo localmente:
-*   **Go** (versão 1.22 ou superior)
-*   **PlatformIO** (VS Code extension) para compilar o firmware
-*   **Docker & Docker Compose**
-*   **FFmpeg** instalado na máquina hospedeira
+1. **Ingestão Centralizada e Broadcaster Não-Bloqueante:**
+   * O servidor mantém **apenas 1 conexão HTTP** com o ESP32-CAM, contornando o limite físico do chip.
+   * Distribuição de vídeo MJPEG em memória para qualquer número de navegadores simultâneos.
+   * Buffers limitados com descarte inteligente de frames para clientes lentos, garantindo que nenhum espectador trave a ingestão ou a gravação.
+2. **Visualização ao Vivo Contínua:**
+   * A transmissão ao vivo fica disponível a qualquer instante (`http://localhost:8080/` ou `/live`), mesmo quando não houver qualquer movimento detectado.
+3. **Gravação Orientada a Eventos com Janela Deslizante (Sliding Window):**
+   * Vídeos são gravados no disco **somente** quando o sensor PIR detecta presença.
+   * Tolerância configurável de inatividade (padrão **30 segundos**). Cada novo evento PIR reinicia o temporizador sem fragmentar o vídeo em múltiplos arquivos.
+   * Ao expirar a tolerância, o processo FFmpeg é encerrado graciosamente (sinal `q` no stdin), garantindo escrita perfeita dos índices MP4 (`moov` atom) sem corrupção.
+4. **Interface Web Integrada:**
+   * Painel responsivo em tema escuro servido diretamente pelo Go em `http://localhost:8080/`.
+   * Player de vídeo ao vivo, telemetria em tempo real (FPS, frames ingeridos, espectadores), catálogo de gravações e player HTML5 com download de MP4.
+5. **Comunicação Binária de Baixo Nível & mTLS:**
+   * Broker Mosquitto operando em porta segura **`8883`** com autenticação mTLS baseada em certificados x509.
+   * Protocolo binário customizado (`0x53 0x4E` - "SN") para máxima economia de banda em microcontroladores.
+6. **Autonomia de Rede Local:**
+   * 100% autônomo, operando localmente na LAN sem dependência de serviços em nuvem ou internet.
 
 ---
 
 ## 🚀 Como Executar
 
-### 1. Inicializar a Infraestrutura de Chaves (mTLS)
-Vá até a pasta `certs/` e execute o script automatizado para criar a sua CA e assinar as chaves dos microsserviços:
+### 1. Inicializar Certificados (mTLS)
 ```bash
 cd certs/
 chmod +x generate_certs.sh
@@ -69,72 +62,60 @@ chmod +x generate_certs.sh
 cd ..
 ```
 
-### 2. Subir a Infraestrutura (PostgreSQL & Mosquitto)
-Inicialize os containers em background:
+### 2. Subir a Infraestrutura (Mosquitto & PostgreSQL)
 ```bash
 docker compose up -d
 ```
+*(Nota: O banco PostgreSQL está mapeado para a porta externa `5435` para evitar conflito com instâncias prévias na `5432`)*.
 
-### 3. Configurar e Gravar o Firmware (ESP32-CAM)
-1.  Navegue até a pasta `firmware/`.
-2.  Duplique o arquivo `private.ini.example` para **`private.ini`**:
-    ```bash
-    cp private.ini.example private.ini
-    ```
-3.  Abra o `private.ini` e configure suas credenciais de Wi-Fi e o IP/hostname local da sua máquina:
-    ```ini
-    [env:esp32cam]
-    build_flags =
-        -D WIFI_SSID=\"NomeDoSeuWifi\"
-        -D WIFI_PASS=\"SenhaDoSeuWifi\"
-        -D MQTT_BROKER_IP=\"nome-do-seu-notebook.local\"
-    ```
-4.  **Carga Automática de Certificados (DX Avançada)**: Não há necessidade de copiar e colar chaves ou certificados manualmente no arquivo de código [main.cpp](firmware/src/main.cpp)! 
-    O sistema possui um script pré-build inteligente escrito em Go ([generate_certs.go](firmware/generate_certs.go)). Ao clicar em compilar, ele lerá de forma 100% automatizada os certificados gerados na sua pasta `certs/` e gerará o cabeçalho dinâmico `secrets.h` para a compilação do ESP32!
-5.  Conecte o seu ESP32-CAM no computador via porta USB usando a placa-base MB e clique no botão **Upload** no VS Code PlatformIO para compilar e gravar de forma automatizada!
-
-
-### 4. Inicializar os Serviços de Backend
-Abra abas separadas no terminal para rodar o servidor:
-
-*   **Aba 1: Media Gateway (Porta HTTP 8080)**
-    ```bash
-    cd media-gateway
-    go run main.go
-    ```
-*   **Aba 2: Ingestion Engine (Porta Segura 8883 + Postgres)**
-    ```bash
-    cd ingestion-engine
-    go run cmd/main.go
-    ```
-
----
-
-## 🧪 Rodar os Testes Unitários
-
-Para rodar os testes matemáticos de compatibilidade e decodificação do protocolo:
-
+### 3. Iniciar o Media Gateway (Porta 8080)
 ```bash
-# No Edge Agent
-cd edge-agent
-go test -v ./internal/protocol/...
+cd media-gateway
+go run main.go
+```
+* Acesse a interface web em: **`http://localhost:8080/`**
+* Stream ao vivo para navegadores ou VLC: **`http://localhost:8080/live?device_id=esp32-cam-01`**
 
-# No Ingestion Engine
-cd ../ingestion-engine
-go test -v ./internal/protocol/...
+### 4. Iniciar o Ingestion Engine (Barramento MQTT + PostgreSQL)
+```bash
+cd ingestion-engine
+go run cmd/main.go
 ```
 
 ---
 
-## 📚 Referências Técnicas & Manuais
+## 🧪 Suíte de Testes Automatizados
 
-Para entender a engenharia por trás do hardware utilizado neste projeto:
-*   [Datasheet Oficial do Sensor Omnivision OV3660 (PDF)](https://www.ovt.com/wp-content/uploads/2022/01/OV03660-Product-Brief.pdf)
-*   [Esquema Elétrico Oficial do ESP32-CAM AI-Thinker (PDF)](https://github.com/SeeedDocument/Camera_Shield-for-Raspberry-Pi/raw/master/resources/ESP32_CAM_V1.6.pdf)
-*   [Especificações do Módulo ESP32-CAM MB & Pinout](https://lastminuteengineers.com/esp32-cam-pinout-reference/)
+O sistema conta com suíte abrangente cobrindo os 10 cenários obrigatórios de conformidade:
+
+* **TESTE 1**: Live disponível sem movimento e sem persistência em disco.
+* **TESTE 2**: Disparo de gravação ao receber evento PIR.
+* **TESTE 3**: Eventos sucessivos reiniciam a tolerância sem duplicar arquivos ou processos.
+* **TESTE 4**: Finalização correta da gravação após término da tolerância.
+* **TESTE 5**: Manutenção da gravação ativa caso surjam novos eventos antes do timeout.
+* **TESTE 6**: Múltiplos espectadores simultâneos consumindo da mesma câmera física.
+* **TESTE 7**: Desconexão de um espectador não interrompe a gravação nem os demais espectadores.
+* **TESTE 8**: Gravação autônoma funcionando mesmo sem espectadores conectados.
+* **TESTE 9**: Identificação e recuperação automática de desconexão da câmera.
+* **TESTE 10**: Encerramento gracioso do servidor (`SIGINT/SIGTERM`) sem arquivos corrompidos.
+
+Para rodar todos os testes do projeto:
+
+```bash
+# Testes do Media Gateway (Broadcaster, Recorder e Integração)
+cd media-gateway
+go test -v ./...
+
+# Testes do Ingestion Engine
+cd ../ingestion-engine
+go test -v ./...
+
+# Testes do Edge Agent
+cd ../edge-agent
+go test -v ./...
+```
 
 ---
 
 ## 📄 Licença
-
-Este projeto está licenciado sob a licença **MIT** - consulte o arquivo [LICENSE](LICENSE) para obter detalhes.
+Distribuído sob a licença **MIT** - consulte o arquivo [LICENSE](LICENSE) para detalhes.

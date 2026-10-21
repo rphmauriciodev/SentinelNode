@@ -16,7 +16,7 @@ func Init(bufferSize int) {
 
 func Start() {
 	log.Println("👷 Worker de persistência de banco de dados iniciado em background...")
-	
+
 	for event := range EventQueue {
 		backoff := 1 * time.Second
 		maxBackoff := 30 * time.Second
@@ -25,12 +25,12 @@ func Start() {
 			err := database.InsertEvent(event)
 			if err == nil {
 				log.Printf("💾 [BANCO] Evento do dispositivo [%s] Salvo no banco de dados!\n", event.DeviceID)
-				break 
+				break
 			}
 
 			log.Printf("❌ [BANCO ERROR] Falha ao salvar evento do dispositivo [%s]: %v. Tentando novamente em %v...\n",
 				event.DeviceID, err, backoff)
-			
+
 			time.Sleep(backoff)
 
 			backoff *= 2
