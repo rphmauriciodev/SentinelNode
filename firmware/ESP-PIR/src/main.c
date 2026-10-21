@@ -36,6 +36,7 @@ extern void conectar_wifi_cpp(const char* ssid, const char* password);
 extern bool wifi_conectado_cpp(void);
 extern void obter_ip_cpp(char* ip_str, size_t max_len);
 extern int obter_status_wifi_cpp(void);
+extern void sincronizar_ntp_cpp(void);
 
 void inicializar_wifi(void) {
     printf("[WIFI] Inicializando conexão de rede...\n");
@@ -100,14 +101,11 @@ void inicializar_mqtt(void) {
 // Sincroniza o relógio interno por NTP para timestamping preciso dos pacotes binários
 void sincronizar_tempo_ntp(void) {
     printf("[NTP] Sincronizando relógio via NTP...\n");
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
-    sntp_setservername(1, "b.ntp.br");
-    sntp_init();
+    sincronizar_ntp_cpp();
 
     time_t now = time(NULL);
     int attempts = 0;
-    while (now < 24 * 3600 && attempts < 30) {
+    while (now < 24 * 3600 && attempts < 60) {
         vTaskDelay(500 / portTICK_PERIOD_MS);
         printf(".");
         now = time(NULL);

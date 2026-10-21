@@ -27,6 +27,10 @@ extern "C" void obter_ip_cpp(char* ip_str, size_t max_len) {
     }
 }
 
+extern "C" void sincronizar_ntp_cpp() {
+    configTime(0, 0, "pool.ntp.org", "b.ntp.br", "200.160.7.197");
+}
+
 void setup() {
     Serial.begin(115200);
     Serial.flush();
