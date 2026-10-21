@@ -445,9 +445,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            device_id: 'esp32-cam-01',
-            video_url: 'http://127.0.0.1:8080/live/esp32-cam-01',
-            duration_seconds: 30
+            device_id: 'esp32-cam-01'
           })
         });
         const result = await res.json();

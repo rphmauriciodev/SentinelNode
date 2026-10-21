@@ -42,9 +42,15 @@ func mockExecutorForIntegration(ctx context.Context, name string, args ...string
 func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 	tmpDir := t.TempDir()
 	frame := createSampleJPEG(32, 32)
+	var camOnline int32 = 1
 	var camConnections int32
 
 	camServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&camOnline) == 0 {
+			http.Error(w, "Camera offline", http.StatusServiceUnavailable)
+			return
+		}
+
 		count := atomic.AddInt32(&camConnections, 1)
 		defer atomic.AddInt32(&camConnections, -1)
 
@@ -63,6 +69,9 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			case <-ticker.C:
+				if atomic.LoadInt32(&camOnline) == 0 {
+					return
+				}
 				fmt.Fprintf(w, "--123456789000000000000987654321\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
 				w.Write(frame)
 				fmt.Fprintf(w, "\r\n")
@@ -111,7 +120,7 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 	gwServer := httptest.NewServer(mux)
 	defer gwServer.Close()
 
-	t.Run("TESTE 1: Live disponível sem movimento e sem gravação no disco", func(t *testing.T) {
+	t.Run("TESTE 1: Sem eventos de movimento, o vídeo continua disponível, mas nenhuma gravação é persistida", func(t *testing.T) {
 		ctxLive, cancelLive := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancelLive()
 
@@ -134,7 +143,7 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TESTE 8: Gravação autônoma sem espectadores conectados", func(t *testing.T) {
+	t.Run("TESTE 2: Ao receber um evento PIR válido, a gravação é iniciada", func(t *testing.T) {
 		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
 		resp, err := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
 		if err != nil || resp.StatusCode != http.StatusOK {
@@ -147,60 +156,16 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		}
 
 		if !recCtrl.IsRecording("esp32-cam-01") {
-			t.Fatal("Gravação deveria estar ativa mesmo com 0 espectadores")
+			t.Fatal("Gravação deveria estar ativa após evento PIR válido")
 		}
 	})
 
-	t.Run("TESTE 6 e 7: Múltiplos espectadores e desconexão independente", func(t *testing.T) {
-
-		ctx1, cancel1 := context.WithTimeout(context.Background(), 150*time.Millisecond)
-		defer cancel1()
-		req1, _ := http.NewRequestWithContext(ctx1, http.MethodGet, gwServer.URL+"/live", nil)
-
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		defer cancel2()
-		req2, _ := http.NewRequestWithContext(ctx2, http.MethodGet, gwServer.URL+"/live", nil)
-
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			r, err := http.DefaultClient.Do(req1)
-			if err == nil {
-				buf := make([]byte, 2048)
-				for {
-					if _, err := r.Body.Read(buf); err != nil {
-						break
-					}
-				}
-				r.Body.Close()
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			r, err := http.DefaultClient.Do(req2)
-			if err == nil {
-				buf := make([]byte, 2048)
-				for {
-					if _, err := r.Body.Read(buf); err != nil {
-						break
-					}
-				}
-				r.Body.Close()
-			}
-		}()
-
-		wg.Wait()
-
-		if atomic.LoadInt32(&camConnections) > 1 {
-			t.Fatalf("A câmera física excedeu 1 conexão concorrente!")
-		}
-	})
-
-	t.Run("TESTE 3 e 5: Renovação de tolerância e idempotência de processos", func(t *testing.T) {
-
+	t.Run("TESTE 3: Eventos sucessivos durante a gravação não criam processos ou arquivos duplicados indevidamente", func(t *testing.T) {
 		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
-		resp, _ := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		resp, err := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("Falha ao disparar evento sucessivo: %v", err)
+		}
 		var res map[string]string
 		_ = json.NewDecoder(resp.Body).Decode(&res)
 
@@ -209,13 +174,18 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		}
 
 		if !recCtrl.IsRecording("esp32-cam-01") {
-			t.Fatal("Gravação deveria continuar ativa")
+			t.Fatal("Gravação deveria continuar ativa sem interrupção")
+		}
+
+		// Metadados ainda devem apontar apenas para a gravação atual
+		metas := store.GetAll()
+		if len(metas) != 1 {
+			t.Fatalf("Esperava exatamente 1 registro de gravação ativa, obteve %d", len(metas))
 		}
 	})
 
-	t.Run("TESTE 4: Encerramento correto após expiração da tolerância", func(t *testing.T) {
-
-		time.Sleep(600 * time.Millisecond)
+	t.Run("TESTE 4: Sem novos eventos durante o período de tolerância, a gravação é finalizada", func(t *testing.T) {
+		time.Sleep(tolerance + 200*time.Millisecond)
 
 		if recCtrl.IsRecording("esp32-cam-01") {
 			t.Fatal("Gravação deveria ter sido finalizada após expiração da tolerância")
@@ -227,8 +197,204 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TESTE 10: Shutdown gracioso", func(t *testing.T) {
+	t.Run("TESTE 5: Um novo evento antes do término da tolerância reinicia o temporizador e mantém a gravação ativa", func(t *testing.T) {
+		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
+		resp, _ := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		var res map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		if res["status"] != "recording_started" {
+			t.Fatalf("Esperava recording_started para nova sessão, obteve %s", res["status"])
+		}
 
+		// Aguarda mais de 50% da tolerância (250ms de 400ms)
+		time.Sleep(250 * time.Millisecond)
+
+		// Dispara novo evento que deve renovar a janela por mais 400ms
+		resp2, _ := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		_ = json.NewDecoder(resp2.Body).Decode(&res)
+		if res["status"] != "recording_extended" {
+			t.Fatalf("Esperava recording_extended na renovação, obteve %s", res["status"])
+		}
+
+		// Aguarda mais 250ms (total 500ms > tolerância inicial de 400ms)
+		time.Sleep(250 * time.Millisecond)
+
+		// A gravação AINDA deve estar ativa pois a tolerância foi renovada!
+		if !recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria continuar ativa devido à renovação da tolerância")
+		}
+
+		// Aguarda expirar a nova tolerância
+		time.Sleep(300 * time.Millisecond)
+		if recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria ter sido finalizada após expiração da nova tolerância")
+		}
+	})
+
+	t.Run("TESTE 6: Dois ou mais espectadores conseguem acessar o mesmo fluxo sem depender de conexões independentes com a câmera", func(t *testing.T) {
+		ctx1, cancel1 := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel1()
+		req1, _ := http.NewRequestWithContext(ctx1, http.MethodGet, gwServer.URL+"/live", nil)
+
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel2()
+		req2, _ := http.NewRequestWithContext(ctx2, http.MethodGet, gwServer.URL+"/live", nil)
+
+		ctx3, cancel3 := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel3()
+		req3, _ := http.NewRequestWithContext(ctx3, http.MethodGet, gwServer.URL+"/live", nil)
+
+		var wg sync.WaitGroup
+		wg.Add(3)
+		for _, r := range []*http.Request{req1, req2, req3} {
+			go func(req *http.Request) {
+				defer wg.Done()
+				resp, err := http.DefaultClient.Do(req)
+				if err == nil {
+					buf := make([]byte, 2048)
+					for {
+						if _, err := resp.Body.Read(buf); err != nil {
+							break
+						}
+					}
+					resp.Body.Close()
+				}
+			}(r)
+		}
+		wg.Wait()
+
+		// Invariante essencial: NUNCA abrir mais de 1 conexão direta com a câmera
+		if atomic.LoadInt32(&camConnections) > 1 {
+			t.Fatalf("Violação de invariante: A câmera física recebeu mais de 1 conexão simultânea!")
+		}
+	})
+
+	t.Run("TESTE 7: A desconexão de um espectador não interrompe a gravação nem os demais espectadores", func(t *testing.T) {
+		// Inicia gravação
+		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
+		_, _ = http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		if !recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria estar ativa")
+		}
+
+		ctxViewerA, cancelViewerA := context.WithCancel(context.Background())
+		ctxViewerB, cancelViewerB := context.WithTimeout(context.Background(), 350*time.Millisecond)
+		defer cancelViewerB()
+
+		viewerBReceivedFrames := int32(0)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Espectador A: desconecta abruptamente após 80ms
+		go func() {
+			defer wg.Done()
+			reqA, _ := http.NewRequestWithContext(ctxViewerA, http.MethodGet, gwServer.URL+"/live", nil)
+			respA, err := http.DefaultClient.Do(reqA)
+			if err == nil {
+				go func() {
+					time.Sleep(80 * time.Millisecond)
+					cancelViewerA()
+				}()
+				buf := make([]byte, 2048)
+				for {
+					if _, err := respA.Body.Read(buf); err != nil {
+						break
+					}
+				}
+				respA.Body.Close()
+			}
+		}()
+
+		// Espectador B: continua consumindo sem interrupção
+		go func() {
+			defer wg.Done()
+			reqB, _ := http.NewRequestWithContext(ctxViewerB, http.MethodGet, gwServer.URL+"/live", nil)
+			respB, err := http.DefaultClient.Do(reqB)
+			if err == nil {
+				buf := make([]byte, 2048)
+				for {
+					n, err := respB.Body.Read(buf)
+					if n > 0 {
+						atomic.AddInt32(&viewerBReceivedFrames, 1)
+					}
+					if err != nil {
+						break
+					}
+				}
+				respB.Body.Close()
+			}
+		}()
+
+		wg.Wait()
+
+		if atomic.LoadInt32(&viewerBReceivedFrames) == 0 {
+			t.Fatal("Espectador B deveria ter continuado recebendo frames normalmente")
+		}
+
+		if !recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("A gravação não pode ser interrompida pela desconexão de espectadores")
+		}
+
+		_ = recCtrl.StopSession("esp32-cam-01")
+	})
+
+	t.Run("TESTE 8: A gravação continua funcionando mesmo sem espectadores", func(t *testing.T) {
+		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
+		resp, err := http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("Falha ao disparar gravação autônoma: %v", err)
+		}
+
+		if !recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria estar ativa autonomamente sem espectadores")
+		}
+
+		time.Sleep(tolerance + 150*time.Millisecond)
+		if recCtrl.IsRecording("esp32-cam-01") {
+			t.Fatal("Gravação deveria ter sido finalizada após tolerância")
+		}
+	})
+
+	t.Run("TESTE 9: A desconexão da câmera é identificada e tratada", func(t *testing.T) {
+		// Simula queda da câmera física
+		atomic.StoreInt32(&camOnline, 0)
+
+		// Aguarda o leitor detectar a desconexão (timeout/EOF)
+		deadlineOffline := time.Now().Add(2 * time.Second)
+		isOffline := false
+		for time.Now().Before(deadlineOffline) {
+			if cs.Status()["status"] == "offline" {
+				isOffline = true
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		if !isOffline {
+			t.Fatalf("Esperava que o status da câmera transitasse para 'offline' após queda da conexão")
+		}
+
+		// Restaura a câmera física
+		atomic.StoreInt32(&camOnline, 1)
+
+		// Aguarda o gateway restabelecer a conexão de ingestão
+		deadlineOnline := time.Now().Add(3 * time.Second)
+		isStreaming := false
+		for time.Now().Before(deadlineOnline) {
+			if cs.Status()["status"] == "streaming" {
+				isStreaming = true
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		if !isStreaming {
+			t.Fatalf("Esperava que o status da câmera retornasse para 'streaming' após recuperação da conexão")
+		}
+	})
+
+	t.Run("TESTE 10: O encerramento do backend finaliza ou interrompe os processos de gravação de maneira controlada", func(t *testing.T) {
 		body, _ := json.Marshal(RecordRequest{DeviceID: "esp32-cam-01"})
 		_, _ = http.Post(gwServer.URL+"/record", "application/json", bytes.NewBuffer(body))
 
@@ -239,7 +405,7 @@ func TestIntegration_SentinelNodeScenarios(t *testing.T) {
 		recCtrl.Shutdown()
 
 		if recCtrl.IsRecording("esp32-cam-01") {
-			t.Fatal("Nenhuma gravação pode restar ativa após Shutdown")
+			t.Fatal("Nenhuma gravação pode restar ativa após Shutdown controlado")
 		}
 	})
 }

@@ -230,7 +230,7 @@ func handleRecord(w http.ResponseWriter, r *http.Request) {
 		req.DeviceID = "esp32-cam-01"
 	}
 
-	if req.VideoURL != "" {
+	if req.VideoURL != "" && !strings.Contains(req.VideoURL, ":"+serverPort+"/") && !strings.Contains(req.VideoURL, "/live") {
 		streamManager.Register(req.DeviceID, req.VideoURL)
 	}
 
@@ -260,18 +260,17 @@ func handleListRecordings(w http.ResponseWriter, r *http.Request) {
 func handleServeRecording(w http.ResponseWriter, r *http.Request) {
 	fileName := strings.TrimPrefix(r.URL.Path, "/recordings/")
 	fileName = filepath.Clean(fileName)
-
-	if strings.Contains(fileName, "..") || strings.HasPrefix(fileName, "/") {
+	if fileName == "" || fileName == "." || strings.Contains(fileName, "..") || strings.HasPrefix(fileName, "/") {
 		http.Error(w, "Acesso inválido", http.StatusBadRequest)
 		return
 	}
 
 	fullPath := filepath.Join(recordingsDir, fileName)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+	info, err := os.Stat(fullPath)
+	if os.IsNotExist(err) || (err == nil && info.IsDir()) {
 		http.Error(w, "Gravação não encontrada", http.StatusNotFound)
 		return
 	}
-
 	w.Header().Set("Content-Type", "video/mp4")
 	http.ServeFile(w, r, fullPath)
 }

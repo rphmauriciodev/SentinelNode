@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -141,8 +142,10 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
+	targetCamID := event.DeviceID
 	if event.VideoURL == "" {
 		if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
+			targetCamID = associatedCam
 			if val, found := activeStreams.Load(associatedCam); found {
 				event.VideoURL = val.(string)
 				log.Printf("[EVENT MAP] Associando sensor PIR [%s] à stream ativa do ESP-CAM [%s]: %s\n",
@@ -152,11 +155,13 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 					event.DeviceID, associatedCam)
 			}
 		}
+	} else if associatedCam, exists := pirToCameraMap[event.DeviceID]; exists {
+		targetCamID = associatedCam
 	}
 
 	log.Printf("\n=== NOVO ALERTA DE SEGURANÇA RECEBIDO ===")
-	log.Printf("Dispositivo: %s | Evento: %s | Horario: %v",
-		event.DeviceID, event.EventType, event.Timestamp.Format("15:04:05"))
+	log.Printf("Dispositivo: %s | Câmera Alvo: %s | Evento: %s | Horario: %v",
+		event.DeviceID, targetCamID, event.EventType, event.Timestamp.Format("15:04:05"))
 	log.Printf("=========================================\n")
 
 	select {
@@ -166,14 +171,35 @@ func handleEvent(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	if event.EventType == "motion_detected" && event.VideoURL != "" {
-		go gateway.TriggerRecording(gatewayURL, event.DeviceID, event.VideoURL, durationSeconds)
+		go gateway.TriggerRecording(gatewayURL, targetCamID, event.VideoURL, durationSeconds)
 	}
 }
 
+func resolveCertPath(relPath string) string {
+	candidates := []string{
+		filepath.Join("..", relPath),
+		relPath,
+		filepath.Join(".", relPath),
+	}
+	if envDir := os.Getenv("CERTS_DIR"); envDir != "" {
+		candidates = append([]string{filepath.Join(envDir, filepath.Base(relPath))}, candidates...)
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join("..", relPath)
+}
+
 func NewTLSConfig() (*tls.Config, error) {
-	caCert, err := os.ReadFile("../certs/ca.crt")
+	caPath := resolveCertPath("certs/ca.crt")
+	clientCrtPath := resolveCertPath("certs/client.crt")
+	clientKeyPath := resolveCertPath("certs/client.key")
+
+	caCert, err := os.ReadFile(caPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("falha ao ler CA cert (%s): %w", caPath, err)
 	}
 
 	rootPool := x509.NewCertPool()
@@ -181,9 +207,9 @@ func NewTLSConfig() (*tls.Config, error) {
 		return nil, errors.New("failed to append CA certificate")
 	}
 
-	cert, err := tls.LoadX509KeyPair("../certs/client.crt", "../certs/client.key")
+	cert, err := tls.LoadX509KeyPair(clientCrtPath, clientKeyPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("falha ao carregar par de chaves do cliente (%s, %s): %w", clientCrtPath, clientKeyPath, err)
 	}
 
 	return &tls.Config{

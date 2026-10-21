@@ -9,9 +9,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
-
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/rphmauriciodev/SentinelNode/edge-agent/config"
 	"github.com/rphmauriciodev/SentinelNode/edge-agent/internal/protocol"
@@ -121,10 +121,31 @@ func main() {
 	log.Println("Agente finalizado.")
 }
 
+func resolveCertPath(relPath string) string {
+	candidates := []string{
+		filepath.Join("..", relPath),
+		relPath,
+		filepath.Join(".", relPath),
+	}
+	if envDir := os.Getenv("CERTS_DIR"); envDir != "" {
+		candidates = append([]string{filepath.Join(envDir, filepath.Base(relPath))}, candidates...)
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join("..", relPath)
+}
+
 func NewTLSConfig() (*tls.Config, error) {
-	caCert, err := os.ReadFile("../certs/ca.crt")
+	caPath := resolveCertPath("certs/ca.crt")
+	clientCrtPath := resolveCertPath("certs/client.crt")
+	clientKeyPath := resolveCertPath("certs/client.key")
+
+	caCert, err := os.ReadFile(caPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("falha ao ler CA cert (%s): %w", caPath, err)
 	}
 
 	rootPool := x509.NewCertPool()
@@ -132,9 +153,9 @@ func NewTLSConfig() (*tls.Config, error) {
 		return nil, errors.New("failed to append CA certificate")
 	}
 
-	cert, err := tls.LoadX509KeyPair("../certs/client.crt", "../certs/client.key")
+	cert, err := tls.LoadX509KeyPair(clientCrtPath, clientKeyPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("falha ao carregar par de chaves do cliente (%s, %s): %w", clientCrtPath, clientKeyPath, err)
 	}
 
 	return &tls.Config{

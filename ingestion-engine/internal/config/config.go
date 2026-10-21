@@ -15,14 +15,26 @@ type Config struct {
 }
 
 func LoadConfig() (config Config, err error) {
+	viper.SetDefault("MQTT_BROKER", "ssl://localhost:8883")
+	viper.SetDefault("MQTT_CLIENT_ID", "ingestion-engine-01")
+	viper.SetDefault("DB_HOST", "localhost")
+	viper.SetDefault("DB_PORT", "5435")
+	viper.SetDefault("DB_USER", "sentinel_user")
+	viper.SetDefault("DB_PASSWORD", "sentinel_password")
+	viper.SetDefault("DB_NAME", "sentinel_db")
+	viper.SetDefault("DB_SSLMODE", "disable")
+	viper.SetDefault("MEDIA_GATEWAY_URL", "http://localhost:8080/record")
+
 	viper.AddConfigPath(".")
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
 	viper.AutomaticEnv()
-	err = viper.ReadInConfig()
-	if err != nil {
-		return
+	if err = viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return config, err
+		}
+		err = nil
 	}
 	err = viper.Unmarshal(&config)
-	return
+	return config, err
 }

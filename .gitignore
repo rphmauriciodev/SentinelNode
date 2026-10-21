@@ -37,6 +37,9 @@ Thumbs.db
 *.log
 tmp/
 
+.venv/
+**/.venv/
+
 # Chaves privadas e certificados
 certs/*.key
 certs/*.csr

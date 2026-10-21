@@ -2,14 +2,32 @@
 set -e
 
 # Detecta o IP local principal da máquina de forma automática
-LOCAL_IP=$(hostname -I | awk '{print $1}')
+LOCAL_IP=""
+if command -v hostname >/dev/null 2>&1; then
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+fi
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7}')
+fi
 if [ -z "$LOCAL_IP" ]; then
     LOCAL_IP="127.0.0.1"
 fi
 echo "💻 IP local detectado: $LOCAL_IP"
 
 # Detecta o hostname do computador
-HOST_NAME=$(hostname)
+HOST_NAME=""
+if command -v hostname >/dev/null 2>&1; then
+    HOST_NAME=$(hostname 2>/dev/null)
+fi
+if [ -z "$HOST_NAME" ] && [ -f /etc/hostname ]; then
+    HOST_NAME=$(cat /etc/hostname | tr -d '\r\n')
+fi
+if [ -z "$HOST_NAME" ]; then
+    HOST_NAME=$(uname -n)
+fi
+if [ -z "$HOST_NAME" ]; then
+    HOST_NAME="localhost"
+fi
 echo "💻 Hostname detectado: $HOST_NAME"
 
 echo "🔑 1. Gerando a Autoridade Certificadora Root (CA)..."
