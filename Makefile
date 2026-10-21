@@ -18,7 +18,7 @@ CYAN   := \033[0;36m
 BOLD   := \033[1m
 RESET  := \033[0m
 
-.PHONY: help up start down stop restart dev status logs logs-gateway logs-engine logs-emulator logs-docker test build certs clean venv
+.PHONY: help up start down stop restart dev status logs logs-gateway logs-engine logs-emulator logs-docker test build certs clean venv flash-pir flash-cam
 
 help:
 	@echo -e "$(BOLD)$(CYAN)========================================================================$(RESET)"
@@ -32,6 +32,8 @@ help:
 	@echo -e "  $(BOLD)$(BLUE)make logs$(RESET)               Acompanha os logs em tempo real (Gateway e Engine)"
 	@echo -e "  $(BOLD)$(BLUE)make test$(RESET)               Executa a suíte de testes de todos os módulos"
 	@echo -e "  $(BOLD)$(BLUE)make build$(RESET)              Compila os binários em Go (media-gateway e engine)"
+	@echo -e "  $(BOLD)$(CYAN)make flash-pir$(RESET)          Grava o firmware no ESP-PIR conectado via serial"
+	@echo -e "  $(BOLD)$(CYAN)make flash-cam$(RESET)          Grava o firmware no ESP32-CAM conectado via serial"
 	@echo -e "  $(BOLD)$(CYAN)make certs$(RESET)              Gera/regenera certificados mTLS x509"
 	@echo -e "  $(BOLD)$(RED)make clean$(RESET)              Encerra processos e remove binários, logs e PIDs"
 	@echo -e "$(BOLD)$(CYAN)========================================================================$(RESET)"
@@ -250,3 +252,13 @@ clean: stop
 	@echo -e "$(YELLOW)🧹 Limpando arquivos temporários, logs e binários...$(RESET)"
 	@rm -rf $(BIN_DIR) $(LOG_DIR) $(RUN_DIR)
 	@echo -e "$(GREEN)Limpeza concluída!$(RESET)"
+
+flash-pir:
+	@echo -e "$(CYAN)⚡ Gravando firmware ESP-PIR na porta serial...$(RESET)"
+	@cd $(PROJECT_ROOT)/firmware/ESP-PIR && pio run -t upload
+	@echo -e "$(GREEN)Firmware ESP-PIR gravado com sucesso!$(RESET)"
+
+flash-cam:
+	@echo -e "$(CYAN)⚡ Gravando firmware ESP32-CAM na porta serial...$(RESET)"
+	@cd $(PROJECT_ROOT)/firmware && pio run -t upload
+	@echo -e "$(GREEN)Firmware ESP32-CAM gravado com sucesso!$(RESET)"
