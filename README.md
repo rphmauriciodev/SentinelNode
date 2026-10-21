@@ -54,51 +54,64 @@ graph TD
 
 ## 🚀 Como Executar
 
-### Opção 1: Subida Rápida via Docker (Recomendado para VM Local)
+### Opção 1: Subida Rápida via Docker Hub (Sem Clonar o Repositório na VM)
 
-A aplicação está 100% conteinerizada e pronta para rodar em qualquer máquina virtual (Proxmox LXC/VM, VirtualBox, VMware, KVM, etc.):
+Todas as imagens oficiais do ecossistema estão publicadas no **Docker Hub** sob o namespace `rphmauriciodev/`. Em uma máquina virtual (VM) limpa com apenas Docker e Docker Compose instalados, **não é necessário clonar o repositório nem compilar nada**:
 
-1. **Configurar variáveis de ambiente (opcional):**
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+# 1. Crie uma pasta e baixe apenas o arquivo docker-compose.yaml
+mkdir -p sentinelnode && cd sentinelnode
+curl -sO https://raw.githubusercontent.com/rphmauriciodev/SentinelNode/main/docker-compose.yaml
 
-2. **Subir toda a stack em background:**
-   ```bash
-   docker compose up -d
-   # ou: make up
-   ```
-   *Os certificados mTLS são gerados automaticamente pelo serviço `certgen` caso ainda não existam no diretório `certs/`.*
+# 2. (Opcional) Baixe o arquivo de variáveis de ambiente para customizações
+curl -sO https://raw.githubusercontent.com/rphmauriciodev/SentinelNode/main/.env.example && cp .env.example .env
 
-3. **Subir com o Emulador de Câmera ESP32-CAM (para testes sem hardware físico):**
-   ```bash
-   docker compose --profile emulator up -d
-   # ou: make dev
-   ```
-   * Stream de teste disponível em: `http://<IP_DA_VM>:8087/stream`
-   * Disparo manual de PIR: `curl -X POST http://<IP_DA_VM>:8087/pir/trigger`
+# 3. Suba toda a stack em background (baixa as imagens do Docker Hub)
+docker compose up -d
 
-4. **Acessos principais:**
-   * **Painel Web de Vigilância:** `http://<IP_DA_VM>:8080/`
-   * **Live Stream Centralizado:** `http://<IP_DA_VM>:8080/live?device_id=esp32-cam-01`
-   * **Status da API e FPS:** `http://<IP_DA_VM>:8080/status`
-   * **Broker MQTT mTLS:** `<IP_DA_VM>:8883`
-   * **PostgreSQL:** `<IP_DA_VM>:5435`
+# Ou para subir incluindo o emulador de hardware ESP32-CAM:
+docker compose --profile emulator up -d
+```
+*Na primeira subida, o container `sentinel_certgen` cria a pasta `./certs/` localmente e gera todos os certificados mTLS (`ca.crt`, `server.crt`, `client.crt`, etc.). As gravações MP4 persistidas são salvas automaticamente na pasta local `./recordings/`.*
 
-5. **Acompanhar logs ou parar:**
-   ```bash
-   # Ver logs de todos os containers
-   docker compose logs -f
-   # ou: make logs
+#### Acessos principais na VM:
+* **Interface Web de Vigilância:** `http://<IP_DA_VM>:8080/`
+* **Live Stream Centralizado:** `http://<IP_DA_VM>:8080/live?device_id=esp32-cam-01`
+* **Status da API e FPS:** `http://<IP_DA_VM>:8080/status`
+* **Broker MQTT mTLS:** `<IP_DA_VM>:8883`
+* **PostgreSQL:** `<IP_DA_VM>:5435`
+* **Emulador Stream (com profile emulator):** `http://<IP_DA_VM>:8087/stream`
 
-   # Parar todos os containers
-   docker compose --profile emulator down
-   # ou: make down
-   ```
+#### Operação diária:
+```bash
+# Ver logs em tempo real
+docker compose logs -f
+
+# Ver status e healthchecks
+docker compose ps
+
+# Parar todos os serviços
+docker compose --profile emulator down
+```
 
 ---
 
-### Opção 2: Execução Nativa no Host (Desenvolvimento Go/Python)
+### Opção 2: Execução com o Repositório Clonado (Makefile)
+
+Se você clonou o repositório na máquina:
+```bash
+# Subir toda a stack via Docker
+make up
+
+# Subir stack com emulador de câmera
+make dev
+
+# Parar todos os containers
+make down
+```
+---
+
+### Opção 3: Execução Nativa no Host (Desenvolvimento Go/Python)
 
 Caso deseje rodar os binários compilados diretamente no host sem containerizar o Go:
 

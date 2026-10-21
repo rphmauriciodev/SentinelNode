@@ -1,25 +1,23 @@
 services:
   certgen:
-    image: alpine:3.22
+    image: rphmauriciodev/sentinel-certgen:${SENTINEL_VERSION:-latest}
+    build:
+      context: ./certs
+      dockerfile: Dockerfile
     container_name: sentinel_certgen
     volumes:
       - ./certs:/certs
-    command: >
-      sh -c "
-        if [ ! -f /certs/ca.crt ] || [ ! -f /certs/server.crt ] || [ ! -f /certs/client.crt ]; then
-          echo '🔑 Certificados mTLS não encontrados. Gerando...' &&
-          apk add --no-cache openssl bash iproute2 &&
-          cd /certs && chmod +x generate_certs.sh && ./generate_certs.sh
-        else
-          echo '🔑 Certificados mTLS válidos já presentes.'
-        fi
-      "
+    environment:
+      EXTRA_SAN: ${EXTRA_SAN:-}
     restart: "no"
     networks:
       - sentinel_net
 
   broker:
-    image: eclipse-mosquitto:latest
+    image: rphmauriciodev/sentinel-broker:${SENTINEL_VERSION:-latest}
+    build:
+      context: ./mosquitto
+      dockerfile: Dockerfile
     container_name: sentinel_mosquitto
     depends_on:
       certgen:
@@ -29,7 +27,6 @@ services:
       - "${MQTT_TLS_PORT:-8883}:8883"
       - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./certs:/mosquitto/config/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 1883 || exit 1"]
@@ -63,6 +60,7 @@ services:
       - sentinel_net
 
   media-gateway:
+    image: rphmauriciodev/sentinel-media-gateway:${SENTINEL_VERSION:-latest}
     build:
       context: ./media-gateway
       dockerfile: Dockerfile
@@ -88,6 +86,7 @@ services:
       - sentinel_net
 
   ingestion-engine:
+    image: rphmauriciodev/sentinel-ingestion-engine:${SENTINEL_VERSION:-latest}
     build:
       context: ./ingestion-engine
       dockerfile: Dockerfile
@@ -118,6 +117,7 @@ services:
       - sentinel_net
 
   camera-emulator:
+    image: rphmauriciodev/sentinel-camera-emulator:${SENTINEL_VERSION:-latest}
     build:
       context: ./firmware/ESP-CAM
       dockerfile: Dockerfile

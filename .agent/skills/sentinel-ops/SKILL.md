@@ -21,20 +21,32 @@ cd ../edge-agent && go test -v ./...
 
 ## 2. Como Subir os Serviços via Docker (Recomendado para VM Local)
 
-### Subida Completa (Broker, DB, Media Gateway e Ingestion Engine)
+### Opção Standalone (Sem Clonar o Repositório na VM)
+Em uma VM limpa com apenas Docker e Docker Compose instalados:
 ```bash
+mkdir -p sentinelnode && cd sentinelnode
+curl -sO https://raw.githubusercontent.com/rphmauriciodev/SentinelNode/main/docker-compose.yaml
 docker compose up -d
-# ou: make up
+# ou com o emulador de hardware:
+docker compose --profile emulator up -d
+```
+* Baixa automaticamente as imagens oficiais do Docker Hub (`rphmauriciodev/sentinel-*`).
+* Cria automaticamente a pasta `./certs/` com os certificados mTLS e `./recordings/` com os MP4s gravados.
+
+### Opção com Repositório Clonado
+```bash
+# Subida completa da stack
+make up
+
+# Subida completa + emulador de câmera
+make dev
+
+# Parar containers
+make down
 ```
 * Media Gateway (Web UI e Stream): `http://<IP_VM>:8080/`
 * Broker MQTT mTLS: `<IP_VM>:8883`
 * PostgreSQL: `<IP_VM>:5435`
-
-### Subida Completa + Emulador de Câmera ESP32-CAM
-```bash
-docker compose --profile emulator up -d
-# ou: make dev
-```
 * Emulador de Stream: `http://<IP_VM>:8087/stream`
 * Disparo manual PIR: `curl -X POST http://<IP_VM>:8087/pir/trigger`
 
@@ -50,12 +62,3 @@ make docker-infra
 make host-up
 # ou: make host-dev (inclui emulador)
 ```
-## 3. Emulação de Câmera e Testes sem Hardware
-
-Se não houver um ESP32-CAM físico disponível:
-```bash
-# Executar o emulador em Python
-cd firmware/ESP-CAM
-python3 emulator.py
-```
-O emulador transmitirá MJPEG na porta `8087` e enviará heartbeats MQTT mTLS para o Mosquitto.
