@@ -1,28 +1,150 @@
-version: '3.8'
-
 services:
+  certgen:
+    image: alpine:3.22
+    container_name: sentinel_certgen
+    volumes:
+      - ./certs:/certs
+    command: >
+      sh -c "
+        if [ ! -f /certs/ca.crt ] || [ ! -f /certs/server.crt ] || [ ! -f /certs/client.crt ]; then
+          echo '🔑 Certificados mTLS não encontrados. Gerando...' &&
+          apk add --no-cache openssl bash iproute2 &&
+          cd /certs && chmod +x generate_certs.sh && ./generate_certs.sh
+        else
+          echo '🔑 Certificados mTLS válidos já presentes.'
+        fi
+      "
+    restart: "no"
+    networks:
+      - sentinel_net
+
   broker:
     image: eclipse-mosquitto:latest
     container_name: sentinel_mosquitto
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
     ports:
-      - "1883:1883"
-      - "8883:8883"
-      - "9001:9001"
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_TLS_PORT:-8883}:8883"
+      - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./certs:/mosquitto/config/certs
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./certs:/mosquitto/config/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1883 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
     restart: always
+    networks:
+      - sentinel_net
+
   db:
     image: postgres:15-alpine
     container_name: sentinel_db
     environment:
-      POSTGRES_USER: sentinel_user
-      POSTGRES_PASSWORD: sentinel_password
-      POSTGRES_DB: sentinel_db
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel_db}
     ports:
       - "${SENTINEL_DB_PORT:-5435}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel_user} -d ${POSTGRES_DB:-sentinel_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
     restart: always
+    networks:
+      - sentinel_net
+
+  media-gateway:
+    build:
+      context: ./media-gateway
+      dockerfile: Dockerfile
+    container_name: sentinel_media_gateway
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      RECORDINGS_DIR: "/app/recordings"
+      DEFAULT_DEVICE_ID: "${DEFAULT_DEVICE_ID:-esp32-cam-01}"
+      DEFAULT_CAMERA_URL: "${DEFAULT_CAMERA_URL:-}"
+      TOLERANCE_SECONDS: "${TOLERANCE_SECONDS:-30}"
+    volumes:
+      - ./recordings:/app/recordings
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - sentinel_net
+
+  ingestion-engine:
+    build:
+      context: ./ingestion-engine
+      dockerfile: Dockerfile
+    container_name: sentinel_ingestion_engine
+    depends_on:
+      broker:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      media-gateway:
+        condition: service_healthy
+    environment:
+      MQTT_BROKER: "ssl://broker:8883"
+      MQTT_CLIENT_ID: "${MQTT_CLIENT_ID:-ingestion-engine-01}"
+      DB_HOST: "db"
+      DB_PORT: "5432"
+      DB_USER: "${POSTGRES_USER:-sentinel_user}"
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-sentinel_password}"
+      DB_NAME: "${POSTGRES_DB:-sentinel_db}"
+      DB_SSLMODE: "disable"
+      MEDIA_GATEWAY_URL: "http://media-gateway:8080/record"
+      CERTS_DIR: "/certs"
+      PIR_CAMERA_MAPPING: "${PIR_CAMERA_MAPPING:-esp32-pir-01:esp32-cam-01}"
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    networks:
+      - sentinel_net
+
+  camera-emulator:
+    build:
+      context: ./firmware/ESP-CAM
+      dockerfile: Dockerfile
+    container_name: sentinel_camera_emulator
+    profiles:
+      - emulator
+      - demo
+    depends_on:
+      broker:
+        condition: service_healthy
+      ingestion-engine:
+        condition: service_started
+    ports:
+      - "${EMULATOR_PORT:-8087}:8087"
+    environment:
+      MQTT_BROKER_IP: "broker"
+      STREAM_HOST: "camera-emulator"
+      CERTS_DIR: "/certs"
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    networks:
+      - sentinel_net
+
 volumes:
   pgdata:
+
+networks:
+  sentinel_net:
+    name: sentinel_net

@@ -19,30 +19,37 @@ cd ../ingestion-engine && go test -v ./...
 cd ../edge-agent && go test -v ./...
 ```
 
-## 2. Como Subir os Serviços Localmente
+## 2. Como Subir os Serviços via Docker (Recomendado para VM Local)
+
+### Subida Completa (Broker, DB, Media Gateway e Ingestion Engine)
+```bash
+docker compose up -d
+# ou: make up
+```
+* Media Gateway (Web UI e Stream): `http://<IP_VM>:8080/`
+* Broker MQTT mTLS: `<IP_VM>:8883`
+* PostgreSQL: `<IP_VM>:5435`
+
+### Subida Completa + Emulador de Câmera ESP32-CAM
+```bash
+docker compose --profile emulator up -d
+# ou: make dev
+```
+* Emulador de Stream: `http://<IP_VM>:8087/stream`
+* Disparo manual PIR: `curl -X POST http://<IP_VM>:8087/pir/trigger`
+
+## 3. Como Subir os Serviços Nativamente (Sem Docker para Go)
 
 ### Passo 1: Infraestrutura (Mosquitto & PostgreSQL)
 ```bash
-docker compose up -d
+make docker-infra
 ```
-* PostgreSQL roda mapeado na porta `5435` do host (`localhost:5435`).
-* Mosquitto MQTT roda nas portas `1883`, `8883` (mTLS) e `9001` (WebSockets).
 
-### Passo 2: Media Gateway
+### Passo 2: Iniciar Serviços Nativos
 ```bash
-cd media-gateway
-go run main.go
+make host-up
+# ou: make host-dev (inclui emulador)
 ```
-* Dashboard Web: `http://localhost:8080/`
-* Stream ao Vivo: `http://localhost:8080/live?device_id=esp32-cam-01`
-* Snapshot JPEG: `http://localhost:8080/snapshot?device_id=esp32-cam-01`
-
-### Passo 3: Ingestion Engine
-```bash
-cd ingestion-engine
-go run cmd/main.go
-```
-
 ## 3. Emulação de Câmera e Testes sem Hardware
 
 Se não houver um ESP32-CAM físico disponível:

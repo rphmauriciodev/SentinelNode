@@ -1,0 +1,7 @@
+bin/
+recordings/
+*.mp4
+*.log
+manifest.json
+.env
+.git

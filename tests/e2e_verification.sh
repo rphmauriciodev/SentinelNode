@@ -26,7 +26,7 @@ trap cleanup EXIT INT TERM
 echo "🔍 1. Verificando infraestrutura Docker (Mosquitto & PostgreSQL)..."
 if ! docker compose ps | grep -q "sentinel_mosquitto.*Up"; then
     echo "Iniciando containers do Docker Compose..."
-    docker compose up -d
+    docker compose up -d broker db
     sleep 2
 fi
 

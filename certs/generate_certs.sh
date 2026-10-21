@@ -36,9 +36,12 @@ openssl req -new -x509 -days 3650 -key ca.key -out ca.crt -subj "/CN=SentinelNod
 
 echo "🔑 2. Gerando chaves e certificados para o Broker MQTT (Server)..."
 openssl genrsa -out server.key 2048
+SAN_ENTRIES="DNS:localhost,DNS:broker,DNS:sentinel_mosquitto,DNS:$HOST_NAME,DNS:$HOST_NAME.local,IP:127.0.0.1,IP:$LOCAL_IP"
+if [ -n "$EXTRA_SAN" ]; then
+    SAN_ENTRIES="$SAN_ENTRIES,$EXTRA_SAN"
+fi
 openssl req -new -key server.key -out server.csr -subj "/CN=localhost" \
-  -addext "subjectAltName = DNS:localhost,DNS:$HOST_NAME,DNS:$HOST_NAME.local,IP:127.0.0.1,IP:$LOCAL_IP"
-
+  -addext "subjectAltName = $SAN_ENTRIES"
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 365 -sha256 -copy_extensions copy
 
 echo "🔑 3. Gerando chaves e certificados para os Clientes (Câmeras e Backend)..."

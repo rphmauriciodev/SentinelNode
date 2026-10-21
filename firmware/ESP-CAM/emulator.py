@@ -156,6 +156,9 @@ def presence_status():
         return jsonify({"presence_active": presence_active})
 
 def get_local_ip():
+    env_host = os.environ.get("STREAM_HOST")
+    if env_host:
+        return env_host
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('10.255.255.255', 1))
@@ -262,7 +265,7 @@ def mqtt_heartbeat_loop(broker_ip, ca_cert, client_cert, client_key, stream_url)
 if __name__ == '__main__':
     broker_ip = resolve_broker_ip()
 
-    certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../certs'))
+    certs_dir = os.environ.get("CERTS_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), '../../certs'))
     ca_cert = os.path.join(certs_dir, 'ca.crt')
     client_cert = os.path.join(certs_dir, 'client.crt')
     client_key = os.path.join(certs_dir, 'client.key')

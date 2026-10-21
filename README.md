@@ -54,35 +54,71 @@ graph TD
 
 ## 🚀 Como Executar
 
-### 1. Inicializar Certificados (mTLS)
-```bash
-cd certs/
-chmod +x generate_certs.sh
-./generate_certs.sh
-cd ..
-```
+### Opção 1: Subida Rápida via Docker (Recomendado para VM Local)
 
-### 2. Subir a Infraestrutura (Mosquitto & PostgreSQL)
-```bash
-docker compose up -d
-```
-*(Nota: O banco PostgreSQL está mapeado para a porta externa `5435` para evitar conflito com instâncias prévias na `5432`)*.
+A aplicação está 100% conteinerizada e pronta para rodar em qualquer máquina virtual (Proxmox LXC/VM, VirtualBox, VMware, KVM, etc.):
 
-### 3. Iniciar o Media Gateway (Porta 8080)
-```bash
-cd media-gateway
-go run main.go
-```
-* Acesse a interface web em: **`http://localhost:8080/`**
-* Stream ao vivo para navegadores ou VLC: **`http://localhost:8080/live?device_id=esp32-cam-01`**
+1. **Configurar variáveis de ambiente (opcional):**
+   ```bash
+   cp .env.example .env
+   ```
 
-### 4. Iniciar o Ingestion Engine (Barramento MQTT + PostgreSQL)
-```bash
-cd ingestion-engine
-go run cmd/main.go
-```
+2. **Subir toda a stack em background:**
+   ```bash
+   docker compose up -d
+   # ou: make up
+   ```
+   *Os certificados mTLS são gerados automaticamente pelo serviço `certgen` caso ainda não existam no diretório `certs/`.*
+
+3. **Subir com o Emulador de Câmera ESP32-CAM (para testes sem hardware físico):**
+   ```bash
+   docker compose --profile emulator up -d
+   # ou: make dev
+   ```
+   * Stream de teste disponível em: `http://<IP_DA_VM>:8087/stream`
+   * Disparo manual de PIR: `curl -X POST http://<IP_DA_VM>:8087/pir/trigger`
+
+4. **Acessos principais:**
+   * **Painel Web de Vigilância:** `http://<IP_DA_VM>:8080/`
+   * **Live Stream Centralizado:** `http://<IP_DA_VM>:8080/live?device_id=esp32-cam-01`
+   * **Status da API e FPS:** `http://<IP_DA_VM>:8080/status`
+   * **Broker MQTT mTLS:** `<IP_DA_VM>:8883`
+   * **PostgreSQL:** `<IP_DA_VM>:5435`
+
+5. **Acompanhar logs ou parar:**
+   ```bash
+   # Ver logs de todos os containers
+   docker compose logs -f
+   # ou: make logs
+
+   # Parar todos os containers
+   docker compose --profile emulator down
+   # ou: make down
+   ```
 
 ---
+
+### Opção 2: Execução Nativa no Host (Desenvolvimento Go/Python)
+
+Caso deseje rodar os binários compilados diretamente no host sem containerizar o Go:
+
+1. **Inicializar Certificados e Infraestrutura (Mosquitto & PostgreSQL):**
+   ```bash
+   make certs
+   make docker-infra
+   ```
+
+2. **Iniciar Serviços Nativamente:**
+   ```bash
+   make host-up
+   # ou para incluir o emulador Python local:
+   make host-dev
+   ```
+
+3. **Encerrar Serviços:**
+   ```bash
+   make host-down
+   ```
 
 ## 🧪 Suíte de Testes Automatizados
 

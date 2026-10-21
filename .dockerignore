@@ -1,0 +1,10 @@
+.git
+.venv
+**/.venv
+bin
+logs
+.run
+**/recordings
+*.mp4
+.pio
+firmware/**/.pio
